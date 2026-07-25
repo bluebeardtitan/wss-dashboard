@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Water Supply Schemes Dashboard</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💧</text></svg>">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <div class="header-left">
+      <h1>💧 Water Supply Schemes</h1>
+      <button class="btn btn-sm btn-outline show-hidden-btn" id="showHiddenBtn" title="Toggle hidden schemes">
+        👁️ Hidden (<span id="showHiddenCount">0</span>)
+      </button>
+    </div>
+    <div class="header-center">
+      <div class="search-wrapper">
+        <label for="searchInput" class="sr-only">Search schemes</label>
+        <input type="text" id="searchInput" placeholder="Search schemes..." />
+        <span class="search-icon">🔍</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <button class="btn btn-secondary" id="dataMenuBtn">📁 Data</button>
+      <button class="btn btn-secondary" id="pivotBtn">📊 Pivot Table</button>
+      <button class="btn btn-primary" id="addSchemeBtn">+ Add Scheme</button>
+      <button class="theme-toggle" id="themeToggle" title="Toggle theme">🌙</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="pendingBar" class="pending-bar hidden">
+      <span>📝</span>
+      <span id="pendingCount">0 pending changes</span>
+      <button class="btn btn-sm btn-primary" id="commitBtn">✓ Commit All</button>
+      <button class="btn btn-sm btn-outline" id="discardBtn">✕ Discard</button>
+    </div>
+    <div id="statsBar" class="stats-bar"></div>
+    <div id="bulkActionBar" class="bulk-action-bar hidden">
+      <span id="bulkSelectedCount">0 selected</span>
+      <button class="btn btn-sm btn-outline" id="bulkSelectAllBtn">Select All</button>
+      <button class="btn btn-sm btn-outline" id="bulkDeselectAllBtn">Deselect All</button>
+      <button class="btn btn-sm btn-primary" id="bulkFieldsBtn">+ Add/Edit Fields</button>
+      <button class="btn btn-sm btn-danger" id="bulkDeleteBtn">🙈 Hide</button>
+    </div>
+    <div id="cardsContainer" class="cards-grid"></div>
+    <div id="emptyState" class="empty-state">
+      <div class="empty-icon">🏗️</div>
+      <h2>No schemes yet</h2>
+      <p>Click "Add Scheme" to create your first water supply scheme entry.</p>
+    </div>
+  </main>
+
+  <!-- Scheme Modal -->
+  <div id="schemeModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="modalTitle">Add Scheme</h2>
+        <button class="modal-close" id="modalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="field-group">
+          <label for="schemeNameInput">Scheme Name <span class="required">*</span></label>
+          <input type="text" id="schemeNameInput" name="schemeName" placeholder="Enter scheme name" />
+        </div>
+        <div class="field-group">
+          <div class="field-label">Custom Fields</div>
+          <datalist id="fieldKeySuggestions"></datalist>
+          <div id="dynamicFields"></div>
+          <button class="btn btn-sm btn-outline" id="addFieldBtn">+ Add Field</button>
+          <button class="btn btn-sm btn-outline hidden-fields-toggle hidden" id="showHiddenFieldsToggle"></button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="modalCancel">Cancel</button>
+        <button class="btn btn-primary" id="modalSave">Save Scheme</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pivot Table Modal -->
+  <div id="pivotModal" class="modal-overlay hidden">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h2>📊 Pivot Table</h2>
+        <button class="modal-close" id="pivotModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="pivot-summary">Drop fields into each role to build your pivot table</div>
+        <div class="pivot-controls">
+          <div class="pivot-card">
+            <div class="pivot-card-header">
+              <span class="pivot-icon">📌</span>
+              <span class="pivot-card-label">Rows</span>
+              <div class="pivot-check-actions">
+                <button class="check-all-btn" data-target="pivotRows">All</button>
+                <button class="check-none-btn" data-target="pivotRows">None</button>
+              </div>
+            </div>
+            <div id="pivotRows" class="pivot-check-list"></div>
+          </div>
+          <div class="pivot-card">
+            <div class="pivot-card-header">
+              <span class="pivot-icon">📋</span>
+              <span class="pivot-card-label">Columns</span>
+              <div class="pivot-check-actions">
+                <button class="check-all-btn" data-target="pivotCols">All</button>
+                <button class="check-none-btn" data-target="pivotCols">None</button>
+              </div>
+            </div>
+            <div id="pivotCols" class="pivot-check-list"></div>
+          </div>
+          <div class="pivot-card">
+            <div class="pivot-card-header">
+              <span class="pivot-icon">📏</span>
+              <label for="pivotValues">Values</label>
+            </div>
+            <select id="pivotValues" name="pivotValues"></select>
+          </div>
+          <div class="pivot-card">
+            <div class="pivot-card-header">
+              <span class="pivot-icon">⚙️</span>
+              <label for="pivotAgg">Aggregation</label>
+            </div>
+            <select id="pivotAgg" name="pivotAgg">
+              <option value="count">📊 Count</option>
+              <option value="sum">➕ Sum</option>
+              <option value="avg">📈 Average</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-pivot" id="generatePivotBtn">
+          <span>▶</span> Generate Pivot Table
+        </button>
+        <div id="pivotResult" class="pivot-result"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detail Modal -->
+  <div id="detailModal" class="modal-overlay hidden">
+    <div class="modal modal-detail">
+      <div class="modal-header">
+        <h2 id="detailModalTitle"></h2>
+        <button class="modal-close" id="detailModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="detail-search-wrapper">
+          <input type="text" id="detailSearchInput" placeholder="Filter fields..." />
+          <span class="detail-search-icon">🔍</span>
+          <span class="detail-field-count" id="detailFieldCount"></span>
+        </div>
+        <div id="detailModalBody" class="detail-body-scroll"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="detailModalEdit">✏️ Edit</button>
+        <button class="btn btn-secondary" id="detailModalCloseBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Data Menu Modal -->
+  <div id="dataMenuModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>📁 Data Menu</h2>
+        <button class="modal-close" id="dataMenuClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="drive-status" id="driveStatus">
+          <div class="drive-status-icon">☁️</div>
+          <div class="drive-status-text">
+            <span id="driveStatusText">Not connected to Google Drive</span>
+            <span class="drive-status-sub" id="driveStatusSub"></span>
+          </div>
+        </div>
+        <div id="driveClientIdSection" class="drive-clientid-section">
+          <label for="driveClientIdInput">Google OAuth Client ID</label>
+          <div class="drive-clientid-row">
+            <input type="text" id="driveClientIdInput" placeholder="xxxx.apps.googleusercontent.com" />
+            <button class="btn btn-sm btn-primary" id="driveClientIdSave">Save</button>
+          </div>
+          <span class="drive-clientid-hint">Create one at <strong>console.cloud.google.com → Credentials → OAuth 2.0 Client ID</strong> (Web application, authorized redirect URI: <span id="driveRedirectUri"></span>)</span>
+        </div>
+        <div class="data-menu-options">
+          <button class="data-menu-item" id="dataImportLocal">
+            <span class="data-menu-icon">📤</span>
+            <div>
+              <div class="data-menu-label">Import from file</div>
+              <div class="data-menu-desc">Load a JSON file from your computer</div>
+            </div>
+          </button>
+          <button class="data-menu-item" id="dataExportLocal">
+            <span class="data-menu-icon">📥</span>
+            <div>
+              <div class="data-menu-label">Export to file</div>
+              <div class="data-menu-desc">Download your data as a JSON file</div>
+            </div>
+          </button>
+          <hr class="data-menu-divider" />
+          <button class="data-menu-item data-menu-item--primary" id="dataDriveConnect">
+            <span class="data-menu-icon" id="driveConnectIcon">🔗</span>
+            <div>
+              <div class="data-menu-label" id="driveConnectLabel">Sign in with Google</div>
+              <div class="data-menu-desc" id="driveConnectDesc">Authorize this app to access your Google Drive</div>
+            </div>
+          </button>
+          <button class="data-menu-item" id="dataDrivePull" disabled>
+            <span class="data-menu-icon">⬇️</span>
+            <div>
+              <div class="data-menu-label">Sync from Drive</div>
+              <div class="data-menu-desc">Replace local data with Drive backup</div>
+            </div>
+          </button>
+          <button class="data-menu-item" id="dataDrivePush" disabled>
+            <span class="data-menu-icon">⬆️</span>
+            <div>
+              <div class="data-menu-label">Sync to Drive</div>
+              <div class="data-menu-desc">Upload local data as a Drive backup</div>
+            </div>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <input type="file" id="importFileInput" accept=".json" class="hidden" />
+
+  <!-- Bulk Fields Modal -->
+  <div id="bulkModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="bulkModalTitle">Add/Edit Fields</h2>
+        <button class="modal-close" id="bulkModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="bulk-modal-desc" id="bulkModalDesc"></p>
+        <div class="field-group">
+          <div class="field-label">Fields to apply</div>
+          <datalist id="bulkFieldKeySuggestions"></datalist>
+          <div id="bulkDynamicFields"></div>
+          <button class="btn btn-sm btn-outline" id="bulkAddFieldBtn">+ Add Field</button>
+        </div>
+        <p class="bulk-hint">Existing fields with the same name will be overwritten. New fields will be added.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="bulkModalCancel">Cancel</button>
+        <button class="btn btn-primary" id="bulkModalSave">Stage Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
