@@ -1392,6 +1392,21 @@ body.selection-mode .card:hover {
 .detail-body-scroll {
   max-height: 50vh;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.detail-body-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+
+.detail-body-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.detail-body-scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
 }
 
 .detail-row {
