@@ -123,6 +123,18 @@ const pivotValues = document.getElementById('pivotValues');
 const pivotAgg = document.getElementById('pivotAgg');
 const generatePivotBtn = document.getElementById('generatePivotBtn');
 const pivotResult = document.getElementById('pivotResult');
+const pivotFormat = document.getElementById('pivotFormat');
+const exportCsvBtn = document.getElementById('exportCsvBtn');
+const copyTableBtn = document.getElementById('copyTableBtn');
+const pivotExportBar = document.getElementById('pivotExportBar');
+const pivotToast = document.getElementById('pivotToast');
+
+function showPivotToast(msg) {
+  pivotToast.textContent = msg;
+  pivotToast.classList.remove('hidden');
+  clearTimeout(pivotToast._timer);
+  pivotToast._timer = setTimeout(() => pivotToast.classList.add('hidden'), 2000);
+}
 
 // Data Menu
 const dataMenuBtn = document.getElementById('dataMenuBtn');
@@ -1055,6 +1067,7 @@ function openPivotModal() {
   renderCheckList(pivotCols, keys, []);
   pivotValues.innerHTML = keys.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join('');
   pivotResult.innerHTML = '';
+  pivotExportBar.classList.add('hidden');
 
   pivotModal.classList.remove('hidden');
 }
@@ -1085,6 +1098,8 @@ generatePivotBtn.addEventListener('click', () => {
   const colKeys = getCheckedValues(pivotCols);
   const valKey = pivotValues.value;
   const agg = pivotAgg.value;
+  const format = pivotFormat.value;
+  const isComma = agg === 'comma' || agg === 'comma-distinct';
 
   if (!rowKeys.length && !colKeys.length) {
     alert('Select at least one row or column field.');
@@ -1097,6 +1112,7 @@ generatePivotBtn.addEventListener('click', () => {
       e.name.toLowerCase().includes(searchQuery.toLowerCase());
   });
 
+  // pivotMap: rowKey -> colKey -> value (number or string[])
   const pivotMap = new Map();
 
   filtered.forEach(s => {
@@ -1104,34 +1120,121 @@ generatePivotBtn.addEventListener('click', () => {
     const rowVal = rowKeys.map(k => String(getFieldValue(e, k) ?? '(blank)')).join('|');
     const colVal = colKeys.map(k => String(getFieldValue(e, k) ?? '(blank)')).join('|');
     const rawVal = getFieldValue(e, valKey);
-    const numVal = agg === 'count' ? 1 : (isNaN(Number(rawVal)) ? 0 : Number(rawVal));
 
     const rowKey = rowKeys.length ? rowVal : '__total__';
     const colKey = colKeys.length ? colVal : '__total__';
 
     if (!pivotMap.has(rowKey)) pivotMap.set(rowKey, new Map());
     const rowMap = pivotMap.get(rowKey);
-    rowMap.set(colKey, (rowMap.get(colKey) || 0) + numVal);
+
+    if (isComma) {
+      const str = String(rawVal ?? '');
+      if (str) {
+        if (!rowMap.has(colKey)) rowMap.set(colKey, []);
+        if (agg === 'comma-distinct') {
+          if (!rowMap.get(colKey).includes(str)) rowMap.get(colKey).push(str);
+        } else {
+          rowMap.get(colKey).push(str);
+        }
+      }
+    } else {
+      const numVal = agg === 'count' ? 1 : (isNaN(Number(rawVal)) ? 0 : Number(rawVal));
+      rowMap.set(colKey, (rowMap.get(colKey) || 0) + numVal);
+    }
   });
+
+  function cellDisplay(rowKey, colKey) {
+    const val = pivotMap.get(rowKey)?.get(colKey);
+    if (val === undefined) return isComma ? '' : 0;
+    if (isComma) return esc(val.join(', '));
+    if (agg === 'avg') return avgCellValue(filtered, rowKeys, colKeys, valKey, rowKey, colKey);
+    return val;
+  }
+
+  function cellRaw(rowKey, colKey) {
+    const val = pivotMap.get(rowKey)?.get(colKey);
+    if (val === undefined) return isComma ? '' : 0;
+    if (isComma) return val.join(', ');
+    return val;
+  }
 
   const rowLabels = Array.from(pivotMap.keys()).sort();
   const colLabels = new Set();
   pivotMap.forEach(m => m.forEach((_, c) => colLabels.add(c)));
   const colLabelsSorted = Array.from(colLabels).sort();
   const totalLabel = '__total__';
+  const displayColLabels = colLabelsSorted.filter(l => l !== totalLabel);
 
-  if (colLabelsSorted.length > 1) colLabelsSorted.push('Total');
+  if (format === 'long') {
+    const overlap = colKeys.some(k => k === valKey);
+
+    if (overlap) {
+      let html = '<table class="pivot-table"><thead><tr>';
+      rowKeys.forEach(k => html += `<th>${esc(k)}</th>`);
+      html += `<th>${esc(valKey)}</th></tr></thead><tbody>`;
+
+      rowLabels.forEach(r => {
+        if (r === totalLabel) return;
+        const rowParts = r === '__total__' ? rowKeys.map(() => '(All)') : r.split('|');
+        if (isComma) {
+          const allVals = [];
+          const rowMap = pivotMap.get(r);
+          if (rowMap) rowMap.forEach(v => { if (Array.isArray(v)) allVals.push(...v); });
+          html += '<tr>';
+          rowParts.forEach(p => html += `<td>${esc(p)}</td>`);
+          html += `<td><strong>${esc(agg === 'comma-distinct' ? [...new Set(allVals)].join(', ') : allVals.join(', '))}</strong></td></tr>`;
+        } else {
+          let rowAgg = 0;
+          const rowMap = pivotMap.get(r);
+          if (rowMap) rowMap.forEach(v => rowAgg += v);
+          html += '<tr>';
+          rowParts.forEach(p => html += `<td>${esc(p)}</td>`);
+          html += `<td><strong>${rowAgg}</strong></td></tr>`;
+        }
+      });
+
+      html += '</tbody></table>';
+      pivotResult.innerHTML = filtered.length === 0 ? '<p>No data to display.</p>' : html;
+      pivotExportBar.classList.toggle('hidden', filtered.length === 0);
+    } else {
+      let html = '<table class="pivot-table"><thead><tr>';
+      rowKeys.forEach(k => html += `<th>${esc(k)}</th>`);
+      colKeys.forEach(k => html += `<th>${esc(k)}</th>`);
+      html += `<th>${esc(valKey)}</th></tr></thead><tbody>`;
+
+      rowLabels.forEach(r => {
+        if (r === totalLabel) return;
+        const displayCols = displayColLabels.length ? displayColLabels : ['__total__'];
+        displayCols.forEach(c => {
+          if (c === 'Total') return;
+          const rowParts = r === '__total__' ? rowKeys.map(() => '(All)') : r.split('|');
+          const colParts = c === '__total__' ? colKeys.map(() => '(All)') : c.split('|');
+          html += '<tr>';
+          rowParts.forEach(p => html += `<td>${esc(p)}</td>`);
+          colParts.forEach(p => html += `<td>${esc(p)}</td>`);
+          html += `<td><strong>${cellDisplay(r, c)}</strong></td></tr>`;
+        });
+      });
+
+      html += '</tbody></table>';
+      pivotResult.innerHTML = filtered.length === 0 ? '<p>No data to display.</p>' : html;
+      pivotExportBar.classList.toggle('hidden', filtered.length === 0);
+    }
+    return;
+  }
+
+  // Wide format (cross-tab)
+  if (displayColLabels.length > 1 && !isComma) colLabelsSorted.push('Total');
 
   let html = '<table class="pivot-table"><thead><tr><th>' +
     (rowKeys.length ? rowKeys.join(' / ') : 'Total') +
     '</th>';
 
-  const displayColLabels = colLabelsSorted.filter(l => l !== totalLabel);
   displayColLabels.forEach(l => {
     const display = l.split('|').join(' / ');
     html += `<th>${esc(display)}</th>`;
   });
-  if (displayColLabels.length > 1) html += '<th>Total</th>';
+  if (displayColLabels.length > 1 && !isComma) html += '<th>Total</th>';
   html += '</tr></thead><tbody>';
 
   rowLabels.forEach(r => {
@@ -1140,20 +1243,24 @@ generatePivotBtn.addEventListener('click', () => {
     html += `<tr><td><strong>${esc(display)}</strong></td>`;
     let rowTotal = 0;
     displayColLabels.forEach(c => {
-      let cellVal = 0;
       if (c === 'Total') {
-        cellVal = rowTotal;
+        html += `<td>${isComma ? '' : rowTotal}</td>`;
       } else {
-        cellVal = pivotMap.get(r)?.get(c) ?? 0;
-        rowTotal += cellVal;
+        const val = pivotMap.get(r)?.get(c);
+        if (isComma) {
+          html += `<td>${esc(Array.isArray(val) ? val.join(', ') : '')}</td>`;
+        } else {
+          let cellVal = val ?? 0;
+          rowTotal += cellVal;
+          html += `<td>${agg === 'avg' ? avgCellValue(filtered, rowKeys, colKeys, valKey, r, c) : cellVal}</td>`;
+        }
       }
-      html += `<td>${agg === 'avg' ? avgCellValue(filtered, rowKeys, colKeys, valKey, r, c) : cellVal}</td>`;
     });
-    if (displayColLabels.length > 1) html += `<td>${rowTotal}</td>`;
+    if (displayColLabels.length > 1 && !isComma) html += `<td>${rowTotal}</td>`;
     html += '</tr>';
   });
 
-  if (rowLabels.length > 1) {
+  if (rowLabels.length > 1 && !isComma) {
     html += '<tr><td><strong>Total</strong></td>';
     displayColLabels.forEach(c => {
       let colTotal = 0;
@@ -1180,9 +1287,66 @@ generatePivotBtn.addEventListener('click', () => {
 
   if (filtered.length === 0) {
     pivotResult.innerHTML = '<p>No data to display.</p>';
+    pivotExportBar.classList.add('hidden');
   } else {
     pivotResult.innerHTML = html;
+    pivotExportBar.classList.remove('hidden');
   }
+});
+
+exportCsvBtn.addEventListener('click', () => {
+  const table = pivotResult.querySelector('table');
+  if (!table) return;
+
+  const rows = [];
+  table.querySelectorAll('tr').forEach(tr => {
+    const cells = [];
+    tr.querySelectorAll('th, td').forEach(td => {
+      let text = td.textContent.trim();
+      if (text.includes(',') || text.includes('"') || text.includes('\n')) {
+        text = '"' + text.replace(/"/g, '""') + '"';
+      }
+      cells.push(text);
+    });
+    rows.push(cells);
+  });
+
+  const csv = rows.map(r => r.join(',')).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'pivot-table.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+  showPivotToast('✓ CSV downloaded');
+});
+
+copyTableBtn.addEventListener('click', () => {
+  const table = pivotResult.querySelector('table');
+  if (!table) return;
+
+  let htmlOut = '<table>';
+  let tsvRows = [];
+  table.querySelectorAll('tr').forEach(tr => {
+    const tsvCells = [];
+    const tds = tr.querySelectorAll('th, td');
+    htmlOut += '<tr>';
+    tds.forEach(td => {
+      const text = td.textContent.trim();
+      tsvCells.push(text);
+      htmlOut += `<td>${esc(text)}</td>`;
+    });
+    htmlOut += '</tr>';
+    tsvRows.push(tsvCells.join('\t'));
+  });
+  htmlOut += '</table>';
+
+  const htmlBlob = new Blob([htmlOut], { type: 'text/html' });
+  const tsvBlob = new Blob([tsvRows.join('\n')], { type: 'text/plain' });
+  const item = new ClipboardItem({ 'text/html': htmlBlob, 'text/plain': tsvBlob });
+  navigator.clipboard.write([item]);
+  showPivotToast('✓ Copied to clipboard');
 });
 
 function avgCellValue(schemesList, rowKeys, colKeys, valKey, rowVal, colVal) {

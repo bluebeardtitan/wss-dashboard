@@ -11,9 +11,6 @@
   <header>
     <div class="header-left">
       <h1>💧 Water Supply Schemes</h1>
-      <button class="btn btn-sm btn-outline show-hidden-btn" id="showHiddenBtn" title="Toggle hidden schemes">
-        👁️ Hidden (<span id="showHiddenCount">0</span>)
-      </button>
     </div>
     <div class="header-center">
       <div class="search-wrapper">
@@ -111,7 +108,6 @@
         <button class="modal-close" id="pivotModalClose">&times;</button>
       </div>
       <div class="modal-body">
-        <div class="pivot-summary">Drop fields into each role to build your pivot table</div>
         <div class="pivot-controls">
           <div class="pivot-card">
             <div class="pivot-card-header">
@@ -151,6 +147,18 @@
               <option value="count">📊 Count</option>
               <option value="sum">➕ Sum</option>
               <option value="avg">📈 Average</option>
+              <option value="comma">📝 Comma list</option>
+              <option value="comma-distinct">📝 Comma (unique)</option>
+            </select>
+          </div>
+          <div class="pivot-card">
+            <div class="pivot-card-header">
+              <span class="pivot-icon">📐</span>
+              <label for="pivotFormat">Format</label>
+            </div>
+            <select id="pivotFormat" name="pivotFormat">
+              <option value="wide">Wide (cross-tab)</option>
+              <option value="long">Long (flat list)</option>
             </select>
           </div>
         </div>
@@ -158,6 +166,15 @@
           <span>▶</span> Generate Pivot Table
         </button>
         <div id="pivotResult" class="pivot-result"></div>
+        <div class="pivot-export-bar hidden" id="pivotExportBar">
+          <button class="btn btn-sm btn-outline" id="exportCsvBtn">
+            <span>📥</span> Export CSV
+          </button>
+          <button class="btn btn-sm btn-outline" id="copyTableBtn">
+            <span>📋</span> Copy to Clipboard
+          </button>
+          <span class="pivot-toast hidden" id="pivotToast">✓ Done</span>
+        </div>
       </div>
     </div>
   </div>
@@ -208,6 +225,14 @@
           <span class="drive-clientid-hint">Create one at <strong>console.cloud.google.com → Credentials → OAuth 2.0 Client ID</strong> (Web application, authorized redirect URI: <span id="driveRedirectUri"></span>)</span>
         </div>
         <div class="data-menu-options">
+          <button class="data-menu-item" id="showHiddenBtn">
+            <span class="data-menu-icon">👁️</span>
+            <div>
+              <div class="data-menu-label">Show hidden schemes <span class="data-menu-count" id="showHiddenCount">0</span></div>
+              <div class="data-menu-desc">Include hidden schemes in the dashboard</div>
+            </div>
+          </button>
+          <hr class="data-menu-divider" />
           <button class="data-menu-item" id="dataImportLocal">
             <span class="data-menu-icon">📤</span>
             <div>

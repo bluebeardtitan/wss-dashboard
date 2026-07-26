@@ -82,10 +82,25 @@ header {
   border-radius: 999px;
 }
 
-.show-hidden-btn.active {
+.show-hidden-btn.active,
+.data-menu-item.active {
+  background: var(--primary-light);
+  border-color: var(--primary);
+}
+
+.data-menu-item.active .data-menu-label {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.data-menu-count {
+  font-size: 0.7rem;
   background: var(--primary);
   color: #fff;
-  border-color: var(--primary);
+  padding: 1px 6px;
+  border-radius: 999px;
+  margin-left: 4px;
+  vertical-align: middle;
 }
 
 .header-center {
@@ -856,6 +871,32 @@ body.selection-mode .card:hover {
   margin-top: 20px;
   overflow-x: auto;
   animation: fadeIn 0.4s ease;
+}
+
+.pivot-export-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  animation: fadeIn 0.3s ease;
+}
+
+.pivot-export-bar .btn {
+  width: auto;
+  flex: none;
+  padding: 6px 14px;
+  font-size: 0.85rem;
+}
+
+.pivot-toast {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #16a34a;
+  background: #dcfce7;
+  padding: 4px 12px;
+  border-radius: 999px;
+  animation: fadeIn 0.2s ease;
+  white-space: nowrap;
 }
 
 .pivot-table {
