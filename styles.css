@@ -1600,11 +1600,13 @@ body.selection-mode .card:hover {
 
 .pivot-check-list::before,
 .copy-picklist-body::before {
+  top: -4px;
   margin-bottom: -18px;
 }
 
 .pivot-check-list::after,
 .copy-picklist-body::after {
+  bottom: -4px;
   margin-top: -18px;
 }
 
