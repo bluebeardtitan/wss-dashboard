@@ -67,6 +67,26 @@
         </div>
         <div class="field-group">
           <div class="field-label">Custom Fields</div>
+          <div class="copy-from-section" id="copyFromSection">
+            <div class="copy-from-header">
+              <label for="copyFromSelect">Copy from:</label>
+              <select id="copyFromSelect">
+                <option value="">— Select a scheme —</option>
+              </select>
+            </div>
+            <div class="copy-from-picklist hidden" id="copyFromPicklist">
+              <div class="copy-picklist-header">
+                <label class="copy-pick-item copy-pick-all">
+                  <input type="checkbox" id="copyPickAll" />
+                  <span>Select all</span>
+                </label>
+              </div>
+              <div class="copy-picklist-body" id="copyPicklistBody"></div>
+              <div class="copy-from-actions">
+                <button class="btn btn-sm btn-primary" id="copyFromBtn">Copy Selected</button>
+              </div>
+            </div>
+          </div>
           <datalist id="fieldKeySuggestions"></datalist>
           <div id="dynamicFields"></div>
           <div class="field-add-row">
@@ -243,7 +263,10 @@
           <div class="field-label">Fields to apply</div>
           <datalist id="bulkFieldKeySuggestions"></datalist>
           <div id="bulkDynamicFields"></div>
-          <button class="btn btn-sm btn-outline" id="bulkAddFieldBtn">+ Add Field</button>
+          <div class="field-add-row">
+            <button class="btn btn-sm btn-outline" id="bulkAddFieldBtn">+ Add Field</button>
+            <button class="btn btn-sm btn-outline" id="bulkAddGroupBtn">📁 Add Group</button>
+          </div>
         </div>
         <p class="bulk-hint">Existing fields with the same name will be overwritten. New fields will be added.</p>
       </div>

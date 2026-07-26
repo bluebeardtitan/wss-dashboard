@@ -1155,6 +1155,161 @@ body.selection-mode .card:hover {
   margin-top: 0;
 }
 
+/* ========== Drag Handle ========== */
+.drag-handle {
+  cursor: grab;
+  color: var(--text-secondary);
+  font-size: 1rem;
+  user-select: none;
+  flex-shrink: 0;
+  opacity: 0.4;
+  transition: opacity var(--transition);
+  padding: 0 2px;
+}
+
+.drag-handle:hover {
+  opacity: 1;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.dragging {
+  opacity: 0.4;
+  background: var(--primary-light) !important;
+}
+
+/* ========== Copy From Section ========== */
+.copy-from-section {
+  margin-bottom: 10px;
+}
+
+.copy-from-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+}
+
+.copy-from-header label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.copy-from-header select {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.8rem;
+  outline: none;
+}
+
+.copy-from-picklist {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  margin-bottom: 8px;
+  animation: slideIn 0.2s ease;
+}
+
+.copy-picklist-header {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+.copy-picklist-body {
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.copy-pick-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: background var(--transition);
+}
+
+.copy-pick-item:hover {
+  background: var(--surface-hover);
+}
+
+.copy-pick-item input[type="checkbox"] {
+  accent-color: var(--primary);
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.copy-pick-item span {
+  color: var(--text);
+}
+
+.copy-pick-item em {
+  color: var(--text-secondary);
+  font-style: normal;
+}
+
+.copy-pick-group {
+  margin-bottom: 2px;
+}
+
+.copy-pick-group-label {
+  font-weight: 600;
+  background: var(--bg);
+}
+
+.copy-pick-field {
+  padding-left: 28px;
+}
+
+.copy-empty {
+  text-align: center;
+  color: var(--text-secondary);
+  font-style: italic;
+  padding: 12px;
+  font-size: 0.8rem;
+}
+
+.copy-from-actions {
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ========== Duplicate Button ========== */
+.card-actions .dup-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 4px;
+  border-radius: 4px;
+  transition: background var(--transition);
+  opacity: 0.6;
+}
+
+.card-actions .dup-btn:hover {
+  background: var(--surface-hover);
+  opacity: 1;
+}
+
 .detail-search-wrapper {
   position: relative;
   display: flex;

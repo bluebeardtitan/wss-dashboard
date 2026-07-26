@@ -68,10 +68,12 @@ let pendingChanges = new Map();
 let newSchemeCounter = 0;
 
 function getEffective(id) {
-  const base = schemes.find(s => s.id === id);
+  const numId = Number(id);
+  const base = schemes.find(s => s.id === id || s.id === numId);
   if (!base) return null;
-  if (pendingChanges.has(id)) {
-    return { ...base, ...pendingChanges.get(id) };
+  const change = pendingChanges.get(id) || pendingChanges.get(numId) || pendingChanges.get(String(base.id));
+  if (change) {
+    return { ...base, ...change };
   }
   return { ...base };
 }
@@ -155,8 +157,16 @@ const bulkModalDesc = document.getElementById('bulkModalDesc');
 const bulkModalClose = document.getElementById('bulkModalClose');
 const bulkDynamicFields = document.getElementById('bulkDynamicFields');
 const bulkAddFieldBtn = document.getElementById('bulkAddFieldBtn');
+const bulkAddGroupBtn = document.getElementById('bulkAddGroupBtn');
 const bulkModalCancel = document.getElementById('bulkModalCancel');
 const bulkModalSave = document.getElementById('bulkModalSave');
+
+// Copy from
+const copyFromSelect = document.getElementById('copyFromSelect');
+const copyFromPicklist = document.getElementById('copyFromPicklist');
+const copyPicklistBody = document.getElementById('copyPicklistBody');
+const copyPickAll = document.getElementById('copyPickAll');
+const copyFromBtn = document.getElementById('copyFromBtn');
 
 // Pending
 const pendingBar = document.getElementById('pendingBar');
@@ -319,6 +329,7 @@ function render() {
           <h3>${esc(e.name)}</h3>${hiddenBadge}${pendingBadge}
           <div class="card-actions">
             <button class="edit-btn" title="Edit">✏️</button>
+            <button class="dup-btn" title="Duplicate scheme">📋</button>
             <button class="hide-btn" title="${e.hidden ? 'Unhide' : 'Hide'}">${e.hidden ? '👁️' : '🙈'}</button>
           </div>
         </div>
@@ -334,6 +345,7 @@ function render() {
     const schemeId = isNaN(numId) ? id : numId;
 
     card.querySelector('.edit-btn').addEventListener('click', e => { e.stopPropagation(); editScheme(schemeId); });
+    card.querySelector('.dup-btn').addEventListener('click', e => { e.stopPropagation(); duplicateScheme(schemeId); });
     card.querySelector('.hide-btn').addEventListener('click', e => { e.stopPropagation(); toggleHideScheme(schemeId); });
     card.querySelector('.card-view-more')?.addEventListener('click', () => openDetailModal(schemeId));
 
@@ -374,6 +386,18 @@ async function loadSchemes() {
 function editScheme(id) {
   const scheme = getEffective(id);
   if (scheme) openModal(scheme);
+}
+
+function duplicateScheme(id) {
+  const source = getEffective(id);
+  if (!source) return;
+  stageNewScheme(
+    source.name + ' (copy)',
+    { ...(source.fields || {}) },
+    { ...(source.hiddenFields || {}) },
+    JSON.parse(JSON.stringify(source.groups || []))
+  );
+  showToast('Scheme duplicated — edit and commit');
 }
 
 function toggleHideScheme(id) {
@@ -422,9 +446,120 @@ function openModal(scheme = null) {
   }
 
   renderHiddenFieldsToggle(hiddenEntries.length);
+
+  // Populate copy-from dropdown (exclude current scheme)
+  copyFromSelect.innerHTML = '<option value="">— Select a scheme —</option>';
+  schemes.filter(s => s.id !== editingId).forEach(s => {
+    const e = getEffective(s.id);
+    copyFromSelect.innerHTML += `<option value="${s.id}">${esc(e.name)}</option>`;
+  });
+  copyFromSelect.value = '';
+  copyFromPicklist.classList.add('hidden');
+
   schemeModal.classList.remove('hidden');
   setTimeout(() => schemeNameInput.focus(), 100);
 }
+
+copyFromSelect.addEventListener('change', () => {
+  const sourceId = copyFromSelect.value;
+  if (!sourceId) { copyFromPicklist.classList.add('hidden'); return; }
+  const source = getEffective(sourceId);
+  if (!source) { copyFromPicklist.classList.add('hidden'); return; }
+
+  const sourceFields = source.fields || {};
+  const sourceGroups = source.groups || [];
+  const groupedKeys = new Set(sourceGroups.flatMap(g => g.fields || []));
+  let html = '';
+
+  sourceGroups.forEach(g => {
+    const gFields = (g.fields || []).filter(k => sourceFields[k] !== undefined);
+    if (gFields.length === 0) return;
+    html += `<div class="copy-pick-group">`;
+    html += `<label class="copy-pick-item copy-pick-group-label">
+      <input type="checkbox" class="copy-pick-group-cb" data-group="${esc(g.name)}" data-fields="${esc(gFields.join(','))}" />
+      <span>📁 ${esc(g.name)}</span>
+    </label>`;
+    gFields.forEach(k => {
+      html += `<label class="copy-pick-item copy-pick-field">
+        <input type="checkbox" class="copy-pick-field-cb" data-key="${esc(k)}" data-group="${esc(g.name)}" />
+        <span>${esc(k)}: <em>${esc(sourceFields[k])}</em></span>
+      </label>`;
+    });
+    html += `</div>`;
+  });
+
+  const ungrouped = Object.entries(sourceFields).filter(([k]) => !groupedKeys.has(k));
+  if (ungrouped.length > 0) {
+    ungrouped.forEach(([k, v]) => {
+      html += `<label class="copy-pick-item copy-pick-field">
+        <input type="checkbox" class="copy-pick-field-cb" data-key="${esc(k)}" />
+        <span>${esc(k)}: <em>${esc(v)}</em></span>
+      </label>`;
+    });
+  }
+
+  copyPicklistBody.innerHTML = html || '<p class="copy-empty">No fields to copy</p>';
+  copyPickAll.checked = false;
+  copyFromPicklist.classList.remove('hidden');
+
+  // Wire group checkboxes
+  copyPicklistBody.querySelectorAll('.copy-pick-group-cb').forEach(gcb => {
+    gcb.addEventListener('change', () => {
+      const fields = gcb.dataset.fields.split(',').filter(Boolean);
+      copyPicklistBody.querySelectorAll(`.copy-pick-field-cb[data-group="${gcb.dataset.group}"]`).forEach(fcb => {
+        fcb.checked = gcb.checked;
+      });
+    });
+  });
+
+  // Wire select all
+  copyPickAll.addEventListener('change', () => {
+    copyPicklistBody.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = copyPickAll.checked);
+  });
+});
+
+copyFromBtn.addEventListener('click', () => {
+  const sourceId = copyFromSelect.value;
+  if (!sourceId) { showToast('Select a scheme first'); return; }
+  const source = getEffective(sourceId);
+  if (!source) return;
+
+  const sourceFields = source.fields || {};
+  const sourceGroups = source.groups || [];
+  const checkedFields = new Set();
+  const checkedGroups = new Map();
+
+  copyPicklistBody.querySelectorAll('.copy-pick-field-cb:checked').forEach(cb => {
+    checkedFields.add(cb.dataset.key);
+    if (cb.dataset.group) {
+      if (!checkedGroups.has(cb.dataset.group)) checkedGroups.set(cb.dataset.group, []);
+      checkedGroups.get(cb.dataset.group).push(cb.dataset.key);
+    }
+  });
+
+  if (checkedFields.size === 0) { showToast('Check at least one field to copy'); return; }
+
+  // Add checked fields as rows
+  checkedFields.forEach(k => {
+    if (sourceFields[k] !== undefined) addFieldRow(k, sourceFields[k], false);
+  });
+
+  // Add checked group headers (only if all fields in group are checked, or group itself is checked)
+  sourceGroups.forEach(g => {
+    const gCb = copyPicklistBody.querySelector(`.copy-pick-group-cb[data-group="${esc(g.name)}"]`);
+    const groupChecked = gCb && gCb.checked;
+    const gFields = (g.fields || []).filter(k => checkedFields.has(k));
+    if (!groupChecked && gFields.length === 0) return;
+    addGroupRow(g.name);
+    gFields.forEach(k => {
+      if (sourceFields[k] !== undefined) addFieldRow(k, sourceFields[k], false);
+    });
+  });
+
+  showToast(`Copied ${checkedFields.size} field(s) from "${source.name}"`);
+  copyFromSelect.value = '';
+  copyFromPicklist.classList.add('hidden');
+});
 
 function renderHiddenFieldsToggle(hiddenCount) {
   if (hiddenCount === 0) {
@@ -460,6 +595,31 @@ function updateFieldSuggestions() {
 
 let fieldRowIndex = 0;
 
+function initDragHandle(row) {
+  const handle = row.querySelector('.drag-handle');
+  if (!handle) return;
+  handle.addEventListener('dragstart', e => {
+    row.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', '');
+  });
+  handle.addEventListener('dragend', () => row.classList.remove('dragging'));
+  row.addEventListener('dragover', e => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const container = row.parentElement;
+    const dragging = container.querySelector('.dragging');
+    if (!dragging || dragging === row) return;
+    const rect = row.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    if (e.clientY < midY) {
+      container.insertBefore(dragging, row);
+    } else {
+      container.insertBefore(dragging, row.nextSibling);
+    }
+  });
+}
+
 function addFieldRow(key = '', value = '', isHidden = false) {
   const idx = fieldRowIndex++;
   const row = document.createElement('div');
@@ -467,6 +627,7 @@ function addFieldRow(key = '', value = '', isHidden = false) {
   row.dataset.isHidden = isHidden ? 'true' : 'false';
   if (isHidden) row.classList.add('field-hidden');
   row.innerHTML = `
+    <span class="drag-handle" draggable="true">⠿</span>
     <input type="text" class="field-key-input" name="field_key_${idx}" placeholder="Field name" value="${esc(key)}" list="fieldKeySuggestions" />
     <input type="text" class="field-value-input" name="field_value_${idx}" placeholder="Value" value="${esc(value)}" />
     <button class="remove-field" type="button" title="Hide field">&times;</button>
@@ -481,6 +642,7 @@ function addFieldRow(key = '', value = '', isHidden = false) {
       updateHiddenFieldsCount();
     }
   });
+  initDragHandle(row);
   dynamicFields.appendChild(row);
   updateHiddenFieldsCount();
 }
@@ -492,11 +654,13 @@ function addGroupRow(name = '') {
   const row = document.createElement('div');
   row.className = 'dynamic-group-row';
   row.innerHTML = `
+    <span class="drag-handle" draggable="true">⠿</span>
     <span class="group-icon">📁</span>
     <input type="text" class="group-name-input" name="group_name_${idx}" placeholder="Group name" value="${esc(name)}" />
     <button class="remove-field" type="button" title="Remove group">&times;</button>
   `;
   row.querySelector('.remove-field').addEventListener('click', () => row.remove());
+  initDragHandle(row);
   dynamicFields.appendChild(row);
 }
 
@@ -696,11 +860,30 @@ function addBulkFieldRow(key = '', value = '') {
   const row = document.createElement('div');
   row.className = 'dynamic-field-row';
   row.innerHTML = `
+    <span class="drag-handle" draggable="true">⠿</span>
     <input type="text" class="field-key-input" name="bulk_field_key_${idx}" placeholder="Field name" value="${esc(key)}" list="bulkFieldKeySuggestions" />
     <input type="text" class="field-value-input" name="bulk_field_value_${idx}" placeholder="Value" value="${esc(value)}" />
     <button class="remove-field" type="button">&times;</button>
   `;
   row.querySelector('.remove-field').addEventListener('click', () => row.remove());
+  initDragHandle(row);
+  bulkDynamicFields.appendChild(row);
+}
+
+let bulkGroupRowIndex = 0;
+
+function addBulkGroupRow(name = '') {
+  const idx = bulkGroupRowIndex++;
+  const row = document.createElement('div');
+  row.className = 'dynamic-group-row';
+  row.innerHTML = `
+    <span class="drag-handle" draggable="true">⠿</span>
+    <span class="group-icon">📁</span>
+    <input type="text" class="group-name-input" name="bulk_group_name_${idx}" placeholder="Group name" value="${esc(name)}" />
+    <button class="remove-field" type="button" title="Remove group">&times;</button>
+  `;
+  row.querySelector('.remove-field').addEventListener('click', () => row.remove());
+  initDragHandle(row);
   bulkDynamicFields.appendChild(row);
 }
 
@@ -714,6 +897,8 @@ function openBulkModal() {
   bulkModalTitle.textContent = 'Add/Edit Fields';
   bulkModalDesc.textContent = `Apply fields to ${selectedIds.size} selected scheme(s). Existing fields with the same name will be overwritten.`;
   bulkDynamicFields.innerHTML = '';
+  bulkFieldRowIndex = 0;
+  bulkGroupRowIndex = 0;
   updateBulkFieldSuggestions();
   addBulkFieldRow('', '');
   bulkModal.classList.remove('hidden');
@@ -730,13 +915,30 @@ bulkModal.addEventListener('click', e => {
   if (e.target === bulkModal) closeBulkModal();
 });
 bulkAddFieldBtn.addEventListener('click', () => addBulkFieldRow('', ''));
+bulkAddGroupBtn.addEventListener('click', () => addBulkGroupRow(''));
 
 bulkModalSave.addEventListener('click', () => {
   const fields = {};
-  bulkDynamicFields.querySelectorAll('.dynamic-field-row').forEach(row => {
+  const groups = [];
+  let currentGroup = null;
+
+  bulkDynamicFields.querySelectorAll('.dynamic-field-row, .dynamic-group-row').forEach(row => {
+    if (row.classList.contains('dynamic-group-row')) {
+      const gName = row.querySelector('.group-name-input').value.trim();
+      if (gName) {
+        currentGroup = { name: gName, fields: [] };
+        groups.push(currentGroup);
+      } else {
+        currentGroup = null;
+      }
+      return;
+    }
     const k = row.querySelector('.field-key-input').value.trim();
     const v = row.querySelector('.field-value-input').value.trim();
-    if (k) fields[k] = v;
+    if (k) {
+      fields[k] = v;
+      if (currentGroup) currentGroup.fields.push(k);
+    }
   });
 
   if (Object.keys(fields).length === 0) {
@@ -747,11 +949,15 @@ bulkModalSave.addEventListener('click', () => {
   for (const id of selectedIds) {
     const current = getEffective(id);
     if (!current) continue;
-    stageChange(id, { fields: { ...(current.fields || {}), ...fields } });
+    const mergedFields = { ...(current.fields || {}), ...fields };
+    const mergedGroups = groups.length > 0
+      ? [...(current.groups || []), ...groups]
+      : (current.groups || []);
+    stageChange(id, { fields: mergedFields, groups: mergedGroups });
   }
   exitSelectionMode();
   closeBulkModal();
-  showToast(`Fields staged for ${Object.keys(fields).length > 0 ? selectedIds.size : 0} scheme(s)`);
+  showToast(`Fields staged for ${selectedIds.size} scheme(s)`);
 });
 
 // ========== Commit / Discard ==========
