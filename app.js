@@ -286,13 +286,24 @@ function render() {
     const groupedKeys = new Set(groups.flatMap(g => g.fields || []));
     const maxPreview = 3;
 
+    // Separate tags (#key) from regular fields
+    const tags = entries.filter(([k]) => k.startsWith('#')).map(([k, v]) => [k, v]);
+    const regularEntries = entries.filter(([k]) => !k.startsWith('#'));
+
+    // Tags as badges
+    const tagsHtml = tags.length
+      ? `<div class="card-tags">${tags.map(([k, v]) =>
+          `<span class="card-tag">${esc(k)}${v ? ': ' + esc(v) : ''}</span>`
+        ).join('')}</div>`
+      : '';
+
     let fieldsHtml = '';
     let shown = 0;
 
     if (groups.length > 0) {
       groups.forEach(g => {
         if (shown >= maxPreview) return;
-        const gFields = (g.fields || []).filter(k => e.fields && e.fields[k] !== undefined);
+        const gFields = (g.fields || []).filter(k => e.fields && e.fields[k] !== undefined && !k.startsWith('#'));
         if (gFields.length === 0) return;
         fieldsHtml += `<div class="card-group-header">${esc(g.name)}</div>`;
         gFields.slice(0, maxPreview - shown).forEach(k => {
@@ -302,13 +313,13 @@ function render() {
       });
     }
 
-    const ungrouped = entries.filter(([k]) => !groupedKeys.has(k));
+    const ungrouped = regularEntries.filter(([k]) => !groupedKeys.has(k));
     ungrouped.slice(0, maxPreview - shown).forEach(([k, v]) => {
       fieldsHtml += `<div class="card-field"><span class="field-key">${esc(k)}</span><span class="field-value">${esc(v)}</span></div>`;
       shown++;
     });
 
-    if (shown === 0) fieldsHtml = '<div class="card-empty">No additional fields</div>';
+    if (shown === 0 && !tagsHtml) fieldsHtml = '<div class="card-empty">No additional fields</div>';
 
     const totalFields = entries.length;
     const viewMore = totalFields > maxPreview
@@ -323,16 +334,24 @@ function render() {
     if (e.hidden) classes.push('card-is-hidden');
     if (isPending) classes.push('card-has-pending');
 
+    const NAME_MAX = 40;
+    const needsTrunc = e.name.length > NAME_MAX;
+    const truncName = needsTrunc ? esc(e.name.slice(0, NAME_MAX)) + '…' : esc(e.name);
+    const nameHtml = needsTrunc
+      ? `<h3 class="card-name-truncated">${truncName}<a href="#" class="card-name-more">see more</a></h3>`
+      : `<h3>${esc(e.name)}</h3>`;
+
     return `
       <div class="${classes.join(' ')}" data-id="${s.id}">
         <div class="card-header">
-          <h3>${esc(e.name)}</h3>${hiddenBadge}${pendingBadge}
+          ${nameHtml}${hiddenBadge}${pendingBadge}
           <div class="card-actions">
             <button class="edit-btn" title="Edit">✏️</button>
             <button class="dup-btn" title="Duplicate scheme">📋</button>
             <button class="hide-btn" title="${e.hidden ? 'Unhide' : 'Hide'}">${e.hidden ? '👁️' : '🙈'}</button>
           </div>
         </div>
+        ${tagsHtml}
         <div class="card-body">${fieldsHtml}${viewMore}</div>
       </div>
     `;
@@ -347,6 +366,14 @@ function render() {
     card.querySelector('.edit-btn').addEventListener('click', e => { e.stopPropagation(); editScheme(schemeId); });
     card.querySelector('.dup-btn').addEventListener('click', e => { e.stopPropagation(); duplicateScheme(schemeId); });
     card.querySelector('.hide-btn').addEventListener('click', e => { e.stopPropagation(); toggleHideScheme(schemeId); });
+    card.querySelector('.card-name-more')?.addEventListener('click', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      const h3 = e.target.closest('h3');
+      const e2 = getEffective(schemeId);
+      h3.innerHTML = esc(e2.name);
+      h3.classList.remove('card-name-truncated');
+    });
     card.querySelector('.card-view-more')?.addEventListener('click', () => openDetailModal(schemeId));
 
     // Long press to enter selection

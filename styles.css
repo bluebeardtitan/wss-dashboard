@@ -383,6 +383,50 @@ body.selection-mode .card:hover {
   margin-right: 8px;
 }
 
+.card-name-truncated {
+  font-size: 1.1rem;
+}
+
+.card-name-more {
+  display: inline;
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--primary);
+  margin-left: 4px;
+  white-space: nowrap;
+}
+
+.card-name-more:hover {
+  text-decoration: underline;
+}
+
+/* ========== Card Tags ========== */
+.card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.card-tag {
+  font-size: 0.7rem;
+  font-weight: 600;
+  background: var(--primary-light);
+  color: var(--primary);
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--primary);
+  white-space: nowrap;
+}
+
+/* ========== Card Field Key Highlight ========== */
+.card-field .field-key {
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  border-bottom: 1px dotted var(--border);
+}
+
 .card-actions {
   display: flex;
   gap: 6px;
