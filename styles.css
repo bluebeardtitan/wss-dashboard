@@ -1084,51 +1084,6 @@ body.selection-mode .card:hover {
   margin: 6px 0;
 }
 
-.drive-clientid-section {
-  margin-bottom: 16px;
-  padding: 14px 16px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-
-.drive-clientid-section label {
-  display: block;
-  font-weight: 600;
-  font-size: 0.85rem;
-  margin-bottom: 8px;
-  color: var(--text);
-}
-
-.drive-clientid-row {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.drive-clientid-row input {
-  flex: 1;
-  padding: 8px 10px;
-  border: 2px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text);
-  font-size: 0.85rem;
-  font-family: monospace;
-  outline: none;
-  transition: border var(--transition);
-}
-
-.drive-clientid-row input:focus {
-  border-color: var(--primary);
-}
-
-.drive-clientid-hint {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  line-height: 1.4;
-}
-
 .data-menu-item--primary {
   border-color: var(--primary);
   background: var(--primary-light);

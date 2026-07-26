@@ -150,10 +150,6 @@ const driveStatusSub = document.getElementById('driveStatusSub');
 const driveConnectDesc = document.getElementById('driveConnectDesc');
 const driveConnectLabel = document.getElementById('driveConnectLabel');
 const driveConnectIcon = document.getElementById('driveConnectIcon');
-const driveClientIdSection = document.getElementById('driveClientIdSection');
-const driveClientIdInput = document.getElementById('driveClientIdInput');
-const driveClientIdSave = document.getElementById('driveClientIdSave');
-const driveRedirectUri = document.getElementById('driveRedirectUri');
 const importFileInput = document.getElementById('importFileInput');
 
 // Bulk
@@ -1422,12 +1418,7 @@ function importJSON(file) {
 
 // ========== Data Menu ==========
 function openDataMenuModal() {
-  const clientId = getDriveClientId();
   const connected = !!window._gdriveToken;
-
-  driveClientIdSection.classList.toggle('hidden', connected);
-  driveClientIdInput.value = clientId;
-  driveRedirectUri.textContent = getRedirectUri();
 
   if (connected) {
     driveStatusText.textContent = 'Connected to Google Drive';
@@ -1438,11 +1429,11 @@ function openDataMenuModal() {
     driveConnectDesc.style.opacity = '1';
   } else {
     driveStatusText.textContent = 'Not connected to Google Drive';
-    driveStatusSub.textContent = clientId ? 'Client ID configured — click Sign in' : 'Enter your Client ID below, then sign in';
+    driveStatusSub.textContent = 'Click Sign in to authorize with Google Drive';
     driveConnectLabel.textContent = 'Sign in with Google';
     driveConnectIcon.textContent = '🔗';
-    driveConnectDesc.textContent = clientId ? 'Redirects to Google to authorize this app' : 'Save a Client ID first';
-    driveConnectDesc.style.opacity = clientId ? '1' : '0.5';
+    driveConnectDesc.textContent = 'Redirects to Google to authorize this app';
+    driveConnectDesc.style.opacity = '1';
   }
 
   dataDrivePull.disabled = !connected;
@@ -1494,33 +1485,15 @@ function clearDriveToken() {
   localStorage.removeItem('gdrive_token_expiry');
 }
 
-function getDriveClientId() {
-  return localStorage.getItem('gdrive_client_id') || '';
-}
-
-function saveDriveClientId(id) {
-  localStorage.setItem('gdrive_client_id', id.trim());
-}
+const _driveClientIdB64 = 'MTA2NzA3NTQ5NTIwMC1wMGhhdXJuanRwMzJvZm51YWVuNzQ5NzBybDN1OHY1di5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbQ==';
+function getDriveClientId() { return atob(_driveClientIdB64); }
 
 function getRedirectUri() {
   return window.location.origin + window.location.pathname;
 }
 
-driveClientIdSave.addEventListener('click', () => {
-  const val = driveClientIdInput.value.trim();
-  if (!val) { showToast('Enter a Client ID first'); return; }
-  saveDriveClientId(val);
-  showToast('Client ID saved');
-  openDataMenuModal();
-});
-
-driveClientIdInput.addEventListener('keydown', e => {
-  if (e.key === 'Enter') driveClientIdSave.click();
-});
-
 function oauthSignIn() {
   var clientId = getDriveClientId();
-  if (!clientId) { showToast('Save a Client ID first'); return; }
 
   var form = document.createElement('form');
   form.setAttribute('method', 'GET');
