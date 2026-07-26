@@ -990,8 +990,22 @@ importFileInput.addEventListener('change', e => {
 });
 
 // ========== Google Drive OAuth ==========
-window._gdriveToken = null;
-window._gdriveTokenExpiry = 0;
+window._gdriveToken = localStorage.getItem('gdrive_token') || null;
+window._gdriveTokenExpiry = parseInt(localStorage.getItem('gdrive_token_expiry') || '0', 10);
+
+function saveDriveToken(token, expiresIn) {
+  window._gdriveToken = token;
+  window._gdriveTokenExpiry = Date.now() + (expiresIn - 60) * 1000;
+  localStorage.setItem('gdrive_token', token);
+  localStorage.setItem('gdrive_token_expiry', String(window._gdriveTokenExpiry));
+}
+
+function clearDriveToken() {
+  window._gdriveToken = null;
+  window._gdriveTokenExpiry = 0;
+  localStorage.removeItem('gdrive_token');
+  localStorage.removeItem('gdrive_token_expiry');
+}
 
 function getDriveClientId() {
   return localStorage.getItem('gdrive_client_id') || '';
@@ -1053,16 +1067,14 @@ function extractTokenFromHash() {
   var token = params.get('access_token');
   var expiresIn = parseInt(params.get('expires_in') || '3600', 10);
   if (token) {
-    window._gdriveToken = token;
-    window._gdriveTokenExpiry = Date.now() + (expiresIn - 60) * 1000;
+    saveDriveToken(token, expiresIn);
     window.history.replaceState(null, '', window.location.pathname + window.location.search);
   }
 }
 
 dataDriveConnect.addEventListener('click', () => {
   if (window._gdriveToken) {
-    window._gdriveToken = null;
-    window._gdriveTokenExpiry = 0;
+    clearDriveToken();
     showToast('Disconnected from Drive');
     openDataMenuModal();
     return;
