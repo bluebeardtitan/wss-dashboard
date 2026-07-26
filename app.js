@@ -526,37 +526,37 @@ copyFromBtn.addEventListener('click', () => {
 
   const sourceFields = source.fields || {};
   const sourceGroups = source.groups || [];
-  const checkedFields = new Set();
-  const checkedGroups = new Map();
+  const checkedFieldKeys = new Set();
 
   copyPicklistBody.querySelectorAll('.copy-pick-field-cb:checked').forEach(cb => {
-    checkedFields.add(cb.dataset.key);
-    if (cb.dataset.group) {
-      if (!checkedGroups.has(cb.dataset.group)) checkedGroups.set(cb.dataset.group, []);
-      checkedGroups.get(cb.dataset.group).push(cb.dataset.key);
-    }
+    checkedFieldKeys.add(cb.dataset.key);
   });
 
-  if (checkedFields.size === 0) { showToast('Check at least one field to copy'); return; }
+  if (checkedFieldKeys.size === 0) { showToast('Check at least one field to copy'); return; }
 
-  // Add checked fields as rows
-  checkedFields.forEach(k => {
-    if (sourceFields[k] !== undefined) addFieldRow(k, sourceFields[k], false);
-  });
+  const groupedCheckedKeys = new Set();
 
-  // Add checked group headers (only if all fields in group are checked, or group itself is checked)
+  // Add checked group headers with their fields
   sourceGroups.forEach(g => {
     const gCb = copyPicklistBody.querySelector(`.copy-pick-group-cb[data-group="${esc(g.name)}"]`);
     const groupChecked = gCb && gCb.checked;
-    const gFields = (g.fields || []).filter(k => checkedFields.has(k));
+    const gFields = (g.fields || []).filter(k => checkedFieldKeys.has(k));
     if (!groupChecked && gFields.length === 0) return;
     addGroupRow(g.name);
     gFields.forEach(k => {
+      groupedCheckedKeys.add(k);
       if (sourceFields[k] !== undefined) addFieldRow(k, sourceFields[k], false);
     });
   });
 
-  showToast(`Copied ${checkedFields.size} field(s) from "${source.name}"`);
+  // Add remaining checked fields not in any group
+  checkedFieldKeys.forEach(k => {
+    if (!groupedCheckedKeys.has(k) && sourceFields[k] !== undefined) {
+      addFieldRow(k, sourceFields[k], false);
+    }
+  });
+
+  showToast(`Copied ${checkedFieldKeys.size} field(s) from "${source.name}"`);
   copyFromSelect.value = '';
   copyFromPicklist.classList.add('hidden');
 });
