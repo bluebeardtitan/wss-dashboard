@@ -1669,3 +1669,64 @@ document.addEventListener('keydown', e => {
     else if (selectionMode) exitSelectionMode();
   }
 });
+
+// ========== Scroll Glow ==========
+// Native scrollbars are hidden (see styles.css). In their place, a soft glow
+// fades in from under the top and/or bottom edge of any scrollable area,
+// only while there's actually more content in that direction, with a gentle
+// pulse animation so it reads as "scroll for more" rather than a static line.
+function initScrollGlow(el, threshold = 4) {
+  if (!el || el._scrollGlowInit) return;
+  el._scrollGlowInit = true;
+
+  function update() {
+    const canUp = el.scrollTop > threshold;
+    const canDown = el.scrollTop < el.scrollHeight - el.clientHeight - threshold;
+    el.classList.toggle('show-top-glow', canUp);
+    el.classList.toggle('show-bottom-glow', canDown);
+  }
+
+  el.addEventListener('scroll', update, { passive: true });
+  if (window.ResizeObserver) new ResizeObserver(update).observe(el);
+  if (window.MutationObserver) {
+    new MutationObserver(update).observe(el, { childList: true, subtree: true, characterData: true });
+  }
+  update();
+  return update;
+}
+
+// Modals scroll as a whole (.modal has overflow-y: auto), so glow the modal box itself
+['schemeModal', 'pivotModal', 'detailModal', 'dataMenuModal', 'bulkModal'].forEach(id => {
+  const overlay = document.getElementById(id);
+  const modalEl = overlay && overlay.querySelector('.modal');
+  if (modalEl) initScrollGlow(modalEl);
+});
+
+// Smaller internal scroll areas
+initScrollGlow(pivotRows);
+initScrollGlow(pivotCols);
+initScrollGlow(copyPicklistBody);
+initScrollGlow(document.getElementById('detailModalBody'));
+
+// Page-level scroll (the main window/body scroll)
+const pageGlowTop = document.createElement('div');
+pageGlowTop.className = 'page-scroll-glow page-scroll-glow-top';
+const pageGlowBottom = document.createElement('div');
+pageGlowBottom.className = 'page-scroll-glow page-scroll-glow-bottom';
+document.body.appendChild(pageGlowTop);
+document.body.appendChild(pageGlowBottom);
+
+function updatePageGlow() {
+  const headerEl = document.querySelector('header');
+  pageGlowTop.style.top = (headerEl ? headerEl.offsetHeight : 0) + 'px';
+  const scrollEl = document.scrollingElement || document.documentElement;
+  const canUp = scrollEl.scrollTop > 4;
+  const canDown = scrollEl.scrollTop < scrollEl.scrollHeight - scrollEl.clientHeight - 4;
+  pageGlowTop.classList.toggle('visible', canUp);
+  pageGlowBottom.classList.toggle('visible', canDown);
+}
+
+window.addEventListener('scroll', updatePageGlow, { passive: true });
+window.addEventListener('resize', updatePageGlow);
+if (window.ResizeObserver) new ResizeObserver(updatePageGlow).observe(document.body);
+updatePageGlow();

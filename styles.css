@@ -16,6 +16,19 @@
   --radius: 12px;
   --radius-sm: 8px;
   --transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  --scrollbar-glow: rgba(37, 99, 235, 0.4);
+}
+
+/* ========== Global Scrollbar (hidden — replaced by Scroll Glow, see bottom of file) ========== */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+*::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 [data-theme="dark"] {
@@ -1392,21 +1405,6 @@ body.selection-mode .card:hover {
 .detail-body-scroll {
   max-height: 50vh;
   overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
-}
-
-.detail-body-scroll::-webkit-scrollbar {
-  width: 5px;
-}
-
-.detail-body-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.detail-body-scroll::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 999px;
 }
 
 .detail-row {
@@ -1522,4 +1520,118 @@ body.selection-mode .card:hover {
   .pending-bar { padding: 8px 16px; flex-wrap: wrap; gap: 6px; }
   .bulk-action-bar { padding: 8px 16px; flex-wrap: wrap; gap: 6px; }
   .pivot-controls { grid-template-columns: 1fr; }
+}
+
+/* ========== Scroll Glow ========== */
+/* Native scrollbars are hidden globally; these glowing edges take their
+   place to signal "there's more content" — they fade in from under the
+   top/bottom edge and gently pulse only while that direction is scrollable. */
+
+@keyframes scrollGlowPulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+/* Internal scroll containers: modals, checklists, picklists, detail body.
+   Implemented as sticky pseudo-elements so they stay pinned to the visible
+   edge of the scrollport as the real content scrolls underneath. */
+.modal,
+.pivot-check-list,
+.copy-picklist-body,
+.detail-body-scroll {
+  position: relative;
+}
+
+.modal::before,
+.modal::after,
+.pivot-check-list::before,
+.pivot-check-list::after,
+.copy-picklist-body::before,
+.copy-picklist-body::after,
+.detail-body-scroll::before,
+.detail-body-scroll::after {
+  content: '';
+  position: sticky;
+  display: block;
+  left: 0;
+  right: 0;
+  height: 26px;
+  pointer-events: none;
+  z-index: 5;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+}
+
+.modal::before,
+.pivot-check-list::before,
+.copy-picklist-body::before,
+.detail-body-scroll::before {
+  top: 0;
+  margin-bottom: -26px;
+  background: linear-gradient(to bottom, var(--scrollbar-glow), transparent);
+}
+
+.modal::after,
+.pivot-check-list::after,
+.copy-picklist-body::after,
+.detail-body-scroll::after {
+  bottom: 0;
+  margin-top: -26px;
+  background: linear-gradient(to top, var(--scrollbar-glow), transparent);
+}
+
+.show-top-glow::before {
+  opacity: 1;
+  animation: scrollGlowPulse 2.2s ease-in-out infinite;
+}
+
+.show-bottom-glow::after {
+  opacity: 1;
+  animation: scrollGlowPulse 2.2s ease-in-out infinite;
+}
+
+/* Smaller inset for compact lists so the glow doesn't overwhelm them */
+.pivot-check-list::before,
+.pivot-check-list::after,
+.copy-picklist-body::before,
+.copy-picklist-body::after {
+  height: 18px;
+}
+
+.pivot-check-list::before,
+.copy-picklist-body::before {
+  margin-bottom: -18px;
+}
+
+.pivot-check-list::after,
+.copy-picklist-body::after {
+  margin-top: -18px;
+}
+
+/* Page-level scroll (the main window/body scroll) — fixed bars whose
+   top position is set in JS to sit just under the sticky header. */
+.page-scroll-glow {
+  position: fixed;
+  left: 0;
+  right: 0;
+  height: 30px;
+  pointer-events: none;
+  z-index: 90;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+}
+
+.page-scroll-glow-top {
+  top: 0;
+  background: linear-gradient(to bottom, var(--scrollbar-glow), transparent);
+}
+
+.page-scroll-glow-bottom {
+  bottom: 0;
+  background: linear-gradient(to top, var(--scrollbar-glow), transparent);
+}
+
+.page-scroll-glow.visible {
+  opacity: 1;
+  animation: scrollGlowPulse 2.2s ease-in-out infinite;
 }
