@@ -84,10 +84,10 @@ function stageChange(id, change) {
   render();
 }
 
-function stageNewScheme(name, fields, hiddenFields) {
+function stageNewScheme(name, fields, hiddenFields, groups) {
   const id = `_new_${++newSchemeCounter}`;
-  schemes.push({ id, name, fields: fields || {}, hiddenFields: hiddenFields || {}, hidden: false, createdAt: new Date().toISOString() });
-  pendingChanges.set(id, { name, fields: fields || {}, hiddenFields: hiddenFields || {} });
+  schemes.push({ id, name, fields: fields || {}, hiddenFields: hiddenFields || {}, groups: groups || [], hidden: false, createdAt: new Date().toISOString() });
+  pendingChanges.set(id, { name, fields: fields || {}, hiddenFields: hiddenFields || {}, groups: groups || [] });
   render();
 }
 
@@ -103,6 +103,7 @@ const modalTitle = document.getElementById('modalTitle');
 const schemeNameInput = document.getElementById('schemeNameInput');
 const dynamicFields = document.getElementById('dynamicFields');
 const addFieldBtn = document.getElementById('addFieldBtn');
+const addGroupBtn = document.getElementById('addGroupBtn');
 const modalSave = document.getElementById('modalSave');
 const modalCancel = document.getElementById('modalCancel');
 const modalClose = document.getElementById('modalClose');
@@ -271,18 +272,37 @@ function render() {
     const isPending = pendingChanges.has(s.id);
     const isNew = typeof s.id === 'string';
     const entries = Object.entries(e.fields || {});
+    const groups = e.groups || [];
+    const groupedKeys = new Set(groups.flatMap(g => g.fields || []));
     const maxPreview = 3;
-    const previewEntries = entries.slice(0, maxPreview);
-    const remaining = entries.length - maxPreview;
 
-    const fieldsHtml = entries.length
-      ? previewEntries.map(([k, v]) =>
-          `<div class="card-field"><span class="field-key">${esc(k)}</span><span class="field-value">${esc(v)}</span></div>`
-        ).join('')
-      : '<div class="card-empty">No additional fields</div>';
+    let fieldsHtml = '';
+    let shown = 0;
 
-    const viewMore = remaining > 0
-      ? `<div class="card-view-more">View all ${entries.length} fields →</div>`
+    if (groups.length > 0) {
+      groups.forEach(g => {
+        if (shown >= maxPreview) return;
+        const gFields = (g.fields || []).filter(k => e.fields && e.fields[k] !== undefined);
+        if (gFields.length === 0) return;
+        fieldsHtml += `<div class="card-group-header">${esc(g.name)}</div>`;
+        gFields.slice(0, maxPreview - shown).forEach(k => {
+          fieldsHtml += `<div class="card-field"><span class="field-key">${esc(k)}</span><span class="field-value">${esc(e.fields[k])}</span></div>`;
+          shown++;
+        });
+      });
+    }
+
+    const ungrouped = entries.filter(([k]) => !groupedKeys.has(k));
+    ungrouped.slice(0, maxPreview - shown).forEach(([k, v]) => {
+      fieldsHtml += `<div class="card-field"><span class="field-key">${esc(k)}</span><span class="field-value">${esc(v)}</span></div>`;
+      shown++;
+    });
+
+    if (shown === 0) fieldsHtml = '<div class="card-empty">No additional fields</div>';
+
+    const totalFields = entries.length;
+    const viewMore = totalFields > maxPreview
+      ? `<div class="card-view-more">View all ${totalFields} fields →</div>`
       : '';
 
     const hiddenBadge = e.hidden ? '<span class="card-hidden-badge">Hidden</span>' : '';
@@ -381,11 +401,23 @@ function openModal(scheme = null) {
 
   const entries = scheme ? Object.entries(scheme.fields || {}) : [];
   const hiddenEntries = scheme ? Object.entries(scheme.hiddenFields || {}) : [];
+  const groups = scheme ? (scheme.groups || []) : [];
+  const groupedKeys = new Set(groups.flatMap(g => g.fields || []));
 
-  if (entries.length === 0 && hiddenEntries.length === 0) {
+  if (entries.length === 0 && hiddenEntries.length === 0 && groups.length === 0) {
     addFieldRow('', '');
   } else {
-    entries.forEach(([k, v]) => addFieldRow(k, v, false));
+    // Render grouped fields under their group headers
+    groups.forEach(g => {
+      addGroupRow(g.name);
+      (g.fields || []).forEach(k => {
+        const v = scheme.fields ? scheme.fields[k] : '';
+        if (v !== undefined) addFieldRow(k, v, false);
+      });
+    });
+    // Render ungrouped fields (not in any group, not hidden)
+    entries.filter(([k]) => !groupedKeys.has(k)).forEach(([k, v]) => addFieldRow(k, v, false));
+    // Render hidden fields
     hiddenEntries.forEach(([k, v]) => addFieldRow(k, v, true));
   }
 
@@ -453,6 +485,21 @@ function addFieldRow(key = '', value = '', isHidden = false) {
   updateHiddenFieldsCount();
 }
 
+let groupRowIndex = 0;
+
+function addGroupRow(name = '') {
+  const idx = groupRowIndex++;
+  const row = document.createElement('div');
+  row.className = 'dynamic-group-row';
+  row.innerHTML = `
+    <span class="group-icon">📁</span>
+    <input type="text" class="group-name-input" name="group_name_${idx}" placeholder="Group name" value="${esc(name)}" />
+    <button class="remove-field" type="button" title="Remove group">&times;</button>
+  `;
+  row.querySelector('.remove-field').addEventListener('click', () => row.remove());
+  dynamicFields.appendChild(row);
+}
+
 function updateHiddenFieldsCount() {
   const hiddenCount = dynamicFields.querySelectorAll('.dynamic-field-row[data-is-hidden="true"]').length;
   if (editingId) renderHiddenFieldsToggle(hiddenCount);
@@ -466,7 +513,20 @@ function collectFieldData() {
   }
   const fields = {};
   const hiddenFields = {};
-  dynamicFields.querySelectorAll('.dynamic-field-row').forEach(row => {
+  const groups = [];
+  let currentGroup = null;
+
+  dynamicFields.querySelectorAll('.dynamic-field-row, .dynamic-group-row').forEach(row => {
+    if (row.classList.contains('dynamic-group-row')) {
+      const gName = row.querySelector('.group-name-input').value.trim();
+      if (gName) {
+        currentGroup = { name: gName, fields: [] };
+        groups.push(currentGroup);
+      } else {
+        currentGroup = null;
+      }
+      return;
+    }
     const k = row.querySelector('.field-key-input').value.trim();
     const v = row.querySelector('.field-value-input').value.trim();
     if (!k) return;
@@ -474,9 +534,10 @@ function collectFieldData() {
       hiddenFields[k] = v;
     } else {
       fields[k] = v;
+      if (currentGroup) currentGroup.fields.push(k);
     }
   });
-  return { name, fields, hiddenFields };
+  return { name, fields, hiddenFields, groups };
 }
 
 addSchemeBtn.addEventListener('click', () => openModal());
@@ -487,6 +548,7 @@ schemeModal.addEventListener('click', e => {
 });
 
 addFieldBtn.addEventListener('click', () => addFieldRow('', ''));
+addGroupBtn.addEventListener('click', () => addGroupRow(''));
 
 showHiddenFieldsToggle.addEventListener('click', () => {
   showHiddenFields = !showHiddenFields;
@@ -504,7 +566,7 @@ modalSave.addEventListener('click', () => {
     stageChange(editingId, data);
     showToast('Changes staged');
   } else {
-    stageNewScheme(data.name, data.fields, data.hiddenFields);
+    stageNewScheme(data.name, data.fields, data.hiddenFields, data.groups);
     showToast('New scheme staged');
   }
   closeModal();
@@ -526,21 +588,46 @@ const detailFieldCount = document.getElementById('detailFieldCount');
 
 let detailSchemeId = null;
 let detailEntries = [];
+let detailGroups = [];
 
 function renderDetailRows() {
   const query = detailSearchInput.value.toLowerCase();
-  const filtered = query
-    ? detailEntries.filter(([k, v]) => k.toLowerCase().includes(query) || String(v).toLowerCase().includes(query))
-    : detailEntries;
+  let rows = '';
 
-  const rows = filtered.length
-    ? filtered.map(([k, v]) =>
-        `<div class="detail-row"><span class="detail-key">${esc(k)}</span><span class="detail-value">${esc(v)}</span></div>`
-      ).join('')
-    : '<p class="detail-empty">No matching fields</p>';
+  if (detailGroups.length > 0 && !query) {
+    const groupedKeys = new Set(detailGroups.flatMap(g => g.fields || []));
+    detailGroups.forEach(g => {
+      const gFields = (g.fields || [])
+        .map(k => [k, detailEntries.find(([ek]) => ek === k)])
+        .filter(([, v]) => v !== undefined);
+      if (gFields.length === 0) return;
+      rows += `<div class="detail-group-header">${esc(g.name)}</div>`;
+      gFields.forEach(([k, [, v]]) => {
+        rows += `<div class="detail-row"><span class="detail-key">${esc(k)}</span><span class="detail-value">${esc(v)}</span></div>`;
+      });
+    });
+    const ungrouped = detailEntries.filter(([k]) => !groupedKeys.has(k));
+    if (ungrouped.length > 0) {
+      ungrouped.forEach(([k, v]) => {
+        rows += `<div class="detail-row"><span class="detail-key">${esc(k)}</span><span class="detail-value">${esc(v)}</span></div>`;
+      });
+    }
+  } else {
+    const filtered = query
+      ? detailEntries.filter(([k, v]) => k.toLowerCase().includes(query) || String(v).toLowerCase().includes(query))
+      : detailEntries;
+    rows = filtered.length
+      ? filtered.map(([k, v]) =>
+          `<div class="detail-row"><span class="detail-key">${esc(k)}</span><span class="detail-value">${esc(v)}</span></div>`
+        ).join('')
+      : '<p class="detail-empty">No matching fields</p>';
+  }
 
+  const totalVisible = query
+    ? detailEntries.filter(([k, v]) => k.toLowerCase().includes(query) || String(v).toLowerCase().includes(query)).length
+    : detailEntries.length;
   detailModalBody.innerHTML = rows;
-  detailFieldCount.textContent = `${filtered.length} of ${detailEntries.length} field${detailEntries.length !== 1 ? 's' : ''}`;
+  detailFieldCount.textContent = `${totalVisible} of ${detailEntries.length} field${detailEntries.length !== 1 ? 's' : ''}`;
 }
 
 function openDetailModal(id) {
@@ -549,6 +636,7 @@ function openDetailModal(id) {
   detailSchemeId = id;
   detailModalTitle.textContent = esc(scheme.name);
   detailEntries = Object.entries(scheme.fields || {});
+  detailGroups = scheme.groups || [];
   detailSearchInput.value = '';
   renderDetailRows();
   detailModal.classList.remove('hidden');
@@ -888,6 +976,7 @@ function exportJSON() {
       name: e.name,
       fields: e.fields,
       hiddenFields: e.hiddenFields,
+      groups: e.groups || [],
       hidden: e.hidden,
       createdAt: e.createdAt
     };
@@ -920,6 +1009,7 @@ function importJSON(file) {
           name: s.name,
           fields: s.fields || {},
           hiddenFields: s.hiddenFields || {},
+          groups: s.groups || [],
           hidden: s.hidden || false,
           createdAt: s.createdAt || new Date().toISOString()
         });
@@ -1144,7 +1234,7 @@ dataDrivePush.addEventListener('click', async () => {
   try {
     const data = schemes.map(s => {
       const e = getEffective(s.id);
-      return { name: e.name, fields: e.fields, hiddenFields: e.hiddenFields, hidden: e.hidden, createdAt: e.createdAt };
+      return { name: e.name, fields: e.fields, hiddenFields: e.hiddenFields, groups: e.groups || [], hidden: e.hidden, createdAt: e.createdAt };
     });
     await driveUpload('scheme-database-backup.json', data);
     showToast('Synced to Google Drive');
@@ -1170,6 +1260,7 @@ dataDrivePull.addEventListener('click', async () => {
         name: s.name,
         fields: s.fields || {},
         hiddenFields: s.hiddenFields || {},
+        groups: s.groups || [],
         hidden: s.hidden || false,
         createdAt: s.createdAt || new Date().toISOString()
       });

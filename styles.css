@@ -1063,6 +1063,98 @@ body.selection-mode .card:hover {
   color: #fff;
 }
 
+/* ========== Group Rows (Edit Form) ========== */
+.dynamic-group-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 12px 0 6px;
+  padding: 6px 8px;
+  background: var(--primary-light);
+  border: 1px dashed var(--primary);
+  border-radius: var(--radius-sm);
+  animation: slideIn 0.2s ease;
+}
+
+.dynamic-group-row:first-child {
+  margin-top: 0;
+}
+
+.dynamic-group-row .group-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.dynamic-group-row input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.85rem;
+  font-weight: 600;
+  outline: none;
+  transition: border var(--transition);
+}
+
+.dynamic-group-row input:focus {
+  box-shadow: 0 0 0 2px var(--primary-light);
+}
+
+.dynamic-group-row .remove-field {
+  background: none;
+  border: none;
+  color: var(--danger);
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: background var(--transition);
+}
+
+.dynamic-group-row .remove-field:hover {
+  background: rgba(239,68,68,0.1);
+}
+
+.field-add-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* ========== Card Group Header ========== */
+.card-group-header {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--primary);
+  padding: 6px 0 2px;
+  margin-top: 4px;
+  border-bottom: 1px solid var(--primary-light);
+}
+
+.card-group-header:first-child {
+  margin-top: 0;
+}
+
+/* ========== Detail Group Header ========== */
+.detail-group-header {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--primary);
+  padding: 12px 0 6px;
+  margin-top: 8px;
+  border-bottom: 2px solid var(--primary);
+}
+
+.detail-group-header:first-child {
+  margin-top: 0;
+}
+
 .detail-search-wrapper {
   position: relative;
   display: flex;
