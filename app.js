@@ -168,6 +168,11 @@ const bulkAddFieldBtn = document.getElementById('bulkAddFieldBtn');
 const bulkAddGroupBtn = document.getElementById('bulkAddGroupBtn');
 const bulkModalCancel = document.getElementById('bulkModalCancel');
 const bulkModalSave = document.getElementById('bulkModalSave');
+const bulkModalNext = document.getElementById('bulkModalNext');
+const bulkModalBack = document.getElementById('bulkModalBack');
+const bulkStep1 = document.getElementById('bulkStep1');
+const bulkStep2 = document.getElementById('bulkStep2');
+const bulkGrid = document.getElementById('bulkGrid');
 
 // Copy from
 const copyFromSelect = document.getElementById('copyFromSelect');
@@ -936,6 +941,11 @@ function openBulkModal() {
   bulkGroupRowIndex = 0;
   updateBulkFieldSuggestions();
   addBulkFieldRow('', '');
+  bulkStep1.classList.remove('hidden');
+  bulkStep2.classList.add('hidden');
+  bulkModalNext.classList.remove('hidden');
+  bulkModalBack.classList.add('hidden');
+  bulkModalSave.classList.add('hidden');
   bulkModal.classList.remove('hidden');
 }
 
@@ -952,44 +962,132 @@ bulkModal.addEventListener('click', e => {
 bulkAddFieldBtn.addEventListener('click', () => addBulkFieldRow('', ''));
 bulkAddGroupBtn.addEventListener('click', () => addBulkGroupRow(''));
 
-bulkModalSave.addEventListener('click', () => {
-  const fields = {};
-  const groups = [];
+bulkModalNext.addEventListener('click', () => {
+  const fieldKeys = [];
+  const groupsData = [];
   let currentGroup = null;
 
   bulkDynamicFields.querySelectorAll('.dynamic-field-row, .dynamic-group-row').forEach(row => {
     if (row.classList.contains('dynamic-group-row')) {
       const gName = row.querySelector('.group-name-input').value.trim();
-      if (gName) {
-        currentGroup = { name: gName, fields: [] };
-        groups.push(currentGroup);
-      } else {
-        currentGroup = null;
-      }
+      currentGroup = gName ? { name: gName, fields: [] } : null;
+      if (currentGroup) groupsData.push(currentGroup);
       return;
     }
     const k = row.querySelector('.field-key-input').value.trim();
-    const v = row.querySelector('.field-value-input').value.trim();
     if (k) {
-      fields[k] = v;
+      fieldKeys.push(k);
       if (currentGroup) currentGroup.fields.push(k);
     }
   });
 
-  if (Object.keys(fields).length === 0) {
-    alert('Add at least one field.');
+  if (fieldKeys.length === 0) {
+    alert('Add at least one field first.');
     return;
   }
 
-  for (const id of selectedIds) {
-    const current = getEffective(id);
-    if (!current) continue;
-    const mergedFields = { ...(current.fields || {}), ...fields };
-    const mergedGroups = groups.length > 0
-      ? [...(current.groups || []), ...groups]
-      : (current.groups || []);
-    stageChange(id, { fields: mergedFields, groups: mergedGroups });
-  }
+  const schemeIds = [...selectedIds];
+  let gridHtml = '<table class="bulk-grid-table"><thead><tr><th class="bulk-grid-scheme-col">Scheme</th>';
+  fieldKeys.forEach(k => gridHtml += `<th>${esc(k)}</th>`);
+  gridHtml += '</tr></thead><tbody>';
+
+  schemeIds.forEach((id, si) => {
+    const e = getEffective(id);
+    gridHtml += `<tr data-scheme-id="${esc(id)}">`;
+    gridHtml += `<td class="bulk-grid-scheme-col"><strong>${esc(e ? e.name : '(unknown)')}</strong></td>`;
+    fieldKeys.forEach((k, fi) => {
+      const existing = e && e.fields ? (e.fields[k] || '') : '';
+      gridHtml += `<td><input type="text" class="bulk-grid-cell" data-fi="${fi}" data-si="${si}" value="${esc(existing)}" /></td>`;
+    });
+    gridHtml += '</tr>';
+  });
+  gridHtml += '</tbody></table>';
+
+  bulkGrid.innerHTML = gridHtml;
+  bulkStep1.classList.add('hidden');
+  bulkStep2.classList.remove('hidden');
+  bulkModalNext.classList.add('hidden');
+  bulkModalBack.classList.remove('hidden');
+  bulkModalSave.classList.remove('hidden');
+
+  bulkGrid.querySelectorAll('.bulk-grid-cell').forEach(cell => {
+    cell.addEventListener('keydown', e => {
+      const fi = parseInt(cell.dataset.fi);
+      const si = parseInt(cell.dataset.si);
+      const rowLen = fieldKeys.length;
+      const colLen = schemeIds.length;
+      let target = null;
+
+      switch (e.key) {
+        case 'ArrowRight': if (fi < rowLen - 1) target = bulkGrid.querySelector(`.bulk-grid-cell[data-si="${si}"][data-fi="${fi + 1}"]`); break;
+        case 'ArrowLeft': if (fi > 0) target = bulkGrid.querySelector(`.bulk-grid-cell[data-si="${si}"][data-fi="${fi - 1}"]`); break;
+        case 'ArrowDown': case 'Enter': if (si < colLen - 1) target = bulkGrid.querySelector(`.bulk-grid-cell[data-si="${si + 1}"][data-fi="${fi}"]`); break;
+        case 'ArrowUp': if (si > 0) target = bulkGrid.querySelector(`.bulk-grid-cell[data-si="${si - 1}"][data-fi="${fi}"]`); break;
+      }
+
+      if (target) {
+        e.preventDefault();
+        target.focus();
+        target.select();
+      }
+    });
+  });
+
+  const first = bulkGrid.querySelector('.bulk-grid-cell');
+  if (first) setTimeout(() => first.focus(), 100);
+});
+
+bulkModalBack.addEventListener('click', () => {
+  bulkStep1.classList.remove('hidden');
+  bulkStep2.classList.add('hidden');
+  bulkModalNext.classList.remove('hidden');
+  bulkModalBack.classList.add('hidden');
+  bulkModalSave.classList.add('hidden');
+});
+
+bulkModalSave.addEventListener('click', () => {
+  const fieldKeys = [];
+  const groupsData = [];
+  let currentGroup = null;
+
+  bulkDynamicFields.querySelectorAll('.dynamic-field-row, .dynamic-group-row').forEach(row => {
+    if (row.classList.contains('dynamic-group-row')) {
+      const gName = row.querySelector('.group-name-input').value.trim();
+      currentGroup = gName ? { name: gName, fields: [] } : null;
+      if (currentGroup) groupsData.push(currentGroup);
+      return;
+    }
+    const k = row.querySelector('.field-key-input').value.trim();
+    if (k) {
+      fieldKeys.push(k);
+      if (currentGroup) currentGroup.fields.push(k);
+    }
+  });
+
+  bulkGrid.querySelectorAll('tr[data-scheme-id]').forEach(tr => {
+    const id = tr.dataset.schemeId;
+    const e = getEffective(id);
+    if (!e) return;
+
+    const fields = { ...(e.fields || {}) };
+    let changed = false;
+
+    tr.querySelectorAll('.bulk-grid-cell').forEach(cell => {
+      const fi = parseInt(cell.dataset.fi);
+      const key = fieldKeys[fi];
+      if (key === undefined) return;
+      fields[key] = cell.value.trim();
+      changed = true;
+    });
+
+    if (changed) {
+      const mergedGroups = groupsData.length > 0
+        ? [...(e.groups || []), ...groupsData]
+        : (e.groups || []);
+      stageChange(id, { fields, groups: mergedGroups });
+    }
+  });
+
   exitSelectionMode();
   closeBulkModal();
   showToast(`Fields staged for ${selectedIds.size} scheme(s)`);
@@ -1058,13 +1156,11 @@ function getCheckedValues(container) {
 
 function openPivotModal() {
   const keys = getFieldKeys();
-
   renderCheckList(pivotRows, keys, ['Scheme Name']);
   renderCheckList(pivotCols, keys, []);
   pivotValues.innerHTML = keys.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join('');
   pivotResult.innerHTML = '';
   pivotExportBar.classList.add('hidden');
-
   pivotModal.classList.remove('hidden');
 }
 
@@ -1108,186 +1204,136 @@ generatePivotBtn.addEventListener('click', () => {
       e.name.toLowerCase().includes(searchQuery.toLowerCase());
   });
 
-  // pivotMap: rowKey -> colKey -> value (number or string[])
-  const pivotMap = new Map();
-
+  // Build flat records: [{ rowKey, colKey, rawVal, rowParts, colParts }]
+  const records = [];
   filtered.forEach(s => {
     const e = getEffective(s.id);
-    const rowVal = rowKeys.map(k => String(getFieldValue(e, k) ?? '(blank)')).join('|');
-    const colVal = colKeys.map(k => String(getFieldValue(e, k) ?? '(blank)')).join('|');
+    const rowParts = rowKeys.map(k => String(getFieldValue(e, k) ?? '(blank)'));
+    const colParts = colKeys.map(k => String(getFieldValue(e, k) ?? '(blank)'));
     const rawVal = getFieldValue(e, valKey);
+    const rowKey = rowKeys.length ? rowParts.join('|') : '__total__';
+    const colKey = colKeys.length ? colParts.join('|') : '__total__';
+    records.push({ rowKey, colKey, rawVal, rowParts, colParts });
+  });
 
-    const rowKey = rowKeys.length ? rowVal : '__total__';
-    const colKey = colKeys.length ? colVal : '__total__';
-
-    if (!pivotMap.has(rowKey)) pivotMap.set(rowKey, new Map());
-    const rowMap = pivotMap.get(rowKey);
-
+  // Aggregate into pivotMap: rowKey|colKey -> aggregated value
+  const pivotMap = new Map();
+  records.forEach(r => {
+    const k = r.rowKey + '||' + r.colKey;
     if (isComma) {
-      const str = String(rawVal ?? '');
-      if (str) {
-        if (!rowMap.has(colKey)) rowMap.set(colKey, []);
-        if (agg === 'comma-distinct') {
-          if (!rowMap.get(colKey).includes(str)) rowMap.get(colKey).push(str);
-        } else {
-          rowMap.get(colKey).push(str);
-        }
-      }
+      const str = String(r.rawVal ?? '');
+      if (!str) return;
+      if (!pivotMap.has(k)) pivotMap.set(k, []);
+      const arr = pivotMap.get(k);
+      if (agg === 'comma-distinct' ? !arr.includes(str) : true) arr.push(str);
     } else {
-      const numVal = agg === 'count' ? 1 : (isNaN(Number(rawVal)) ? 0 : Number(rawVal));
-      rowMap.set(colKey, (rowMap.get(colKey) || 0) + numVal);
+      const num = agg === 'count' ? 1 : (isNaN(Number(r.rawVal)) ? 0 : Number(r.rawVal));
+      pivotMap.set(k, (pivotMap.get(k) || 0) + num);
     }
   });
 
-  function cellDisplay(rowKey, colKey) {
-    const val = pivotMap.get(rowKey)?.get(colKey);
-    if (val === undefined) return isComma ? '' : 0;
-    if (isComma) return esc(val.join(', '));
-    if (agg === 'avg') return avgCellValue(filtered, rowKeys, colKeys, valKey, rowKey, colKey);
-    return val;
-  }
-
-  function cellRaw(rowKey, colKey) {
-    const val = pivotMap.get(rowKey)?.get(colKey);
-    if (val === undefined) return isComma ? '' : 0;
-    if (isComma) return val.join(', ');
-    return val;
-  }
-
-  const rowLabels = Array.from(pivotMap.keys()).sort();
-  const colLabels = new Set();
-  pivotMap.forEach(m => m.forEach((_, c) => colLabels.add(c)));
-  const colLabelsSorted = Array.from(colLabels).sort();
+  // Unique row / column labels
+  const rowSet = new Set(records.map(r => r.rowKey));
+  const colSet = new Set(records.map(r => r.colKey));
+  const rowLabels = [...rowSet].sort();
+  const colLabels = [...colSet].filter(c => c !== '__total__').sort();
   const totalLabel = '__total__';
-  const displayColLabels = colLabelsSorted.filter(l => l !== totalLabel);
 
+  // Helper: get aggregated value for a (rowKey, colKey) pair
+  function getVal(rowKey, colKey) {
+    const v = pivotMap.get(rowKey + '||' + colKey);
+    if (v === undefined) return isComma ? '' : 0;
+    if (isComma) return esc(v.join(', '));
+    return v;
+  }
+
+  // For avg aggregation, recompute average from raw records
+  function getAvg(rowKey, colKey) {
+    const items = records.filter(r => r.rowKey === rowKey && r.colKey === colKey);
+    if (!items.length) return 0;
+    const sum = items.reduce((acc, r) => acc + (isNaN(Number(r.rawVal)) ? 0 : Number(r.rawVal)), 0);
+    return (sum / items.length).toFixed(2);
+  }
+
+  function cellVal(rowKey, colKey) {
+    return agg === 'avg' ? getAvg(rowKey, colKey) : getVal(rowKey, colKey);
+  }
+
+  function displayParts(parts) {
+    return parts.join(' / ');
+  }
+
+  // ========== Long format ==========
   if (format === 'long') {
-    const overlap = colKeys.some(k => k === valKey);
+    let html = '<table class="pivot-table"><thead><tr>';
+    rowKeys.forEach(k => html += `<th>${esc(k)}</th>`);
+    colKeys.forEach(k => html += `<th>${esc(k)}</th>`);
+    html += '</tr></thead><tbody>';
 
-    if (overlap) {
-      let html = '<table class="pivot-table"><thead><tr>';
-      rowKeys.forEach(k => html += `<th>${esc(k)}</th>`);
-      html += `<th>${esc(valKey)}</th></tr></thead><tbody>`;
+    records.forEach(r => {
+      html += '<tr>';
+      r.rowParts.forEach(p => html += `<td>${esc(p)}</td>`);
+      r.colParts.forEach(p => html += `<td>${esc(p)}</td>`);
+      html += '</tr>';
+    });
 
-      rowLabels.forEach(r => {
-        if (r === totalLabel) return;
-        const rowParts = r === '__total__' ? rowKeys.map(() => '(All)') : r.split('|');
-        if (isComma) {
-          const allVals = [];
-          const rowMap = pivotMap.get(r);
-          if (rowMap) rowMap.forEach(v => { if (Array.isArray(v)) allVals.push(...v); });
-          html += '<tr>';
-          rowParts.forEach(p => html += `<td>${esc(p)}</td>`);
-          html += `<td><strong>${esc(agg === 'comma-distinct' ? [...new Set(allVals)].join(', ') : allVals.join(', '))}</strong></td></tr>`;
-        } else {
-          let rowAgg = 0;
-          const rowMap = pivotMap.get(r);
-          if (rowMap) rowMap.forEach(v => rowAgg += v);
-          html += '<tr>';
-          rowParts.forEach(p => html += `<td>${esc(p)}</td>`);
-          html += `<td><strong>${rowAgg}</strong></td></tr>`;
-        }
-      });
-
-      html += '</tbody></table>';
-      pivotResult.innerHTML = filtered.length === 0 ? '<p>No data to display.</p>' : html;
-      pivotExportBar.classList.toggle('hidden', filtered.length === 0);
-    } else {
-      let html = '<table class="pivot-table"><thead><tr>';
-      rowKeys.forEach(k => html += `<th>${esc(k)}</th>`);
-      colKeys.forEach(k => html += `<th>${esc(k)}</th>`);
-      html += `<th>${esc(valKey)}</th></tr></thead><tbody>`;
-
-      rowLabels.forEach(r => {
-        if (r === totalLabel) return;
-        const displayCols = displayColLabels.length ? displayColLabels : ['__total__'];
-        displayCols.forEach(c => {
-          if (c === 'Total') return;
-          const rowParts = r === '__total__' ? rowKeys.map(() => '(All)') : r.split('|');
-          const colParts = c === '__total__' ? colKeys.map(() => '(All)') : c.split('|');
-          html += '<tr>';
-          rowParts.forEach(p => html += `<td>${esc(p)}</td>`);
-          colParts.forEach(p => html += `<td>${esc(p)}</td>`);
-          html += `<td><strong>${cellDisplay(r, c)}</strong></td></tr>`;
-        });
-      });
-
-      html += '</tbody></table>';
-      pivotResult.innerHTML = filtered.length === 0 ? '<p>No data to display.</p>' : html;
-      pivotExportBar.classList.toggle('hidden', filtered.length === 0);
-    }
+    html += '</tbody></table>';
+    pivotResult.innerHTML = filtered.length === 0 ? '<p>No data to display.</p>' : html;
+    pivotExportBar.classList.toggle('hidden', filtered.length === 0);
     return;
   }
 
-  // Wide format (cross-tab)
-  if (displayColLabels.length > 1 && !isComma) colLabelsSorted.push('Total');
+  // ========== Wide format (cross-tab) ==========
+  const showTotals = colLabels.length > 1 && !isComma;
+  const colHeaders = showTotals ? [...colLabels, 'Total'] : colLabels;
 
   let html = '<table class="pivot-table"><thead><tr><th>' +
     (rowKeys.length ? rowKeys.join(' / ') : 'Total') +
     '</th>';
 
-  displayColLabels.forEach(l => {
-    const display = l.split('|').join(' / ');
-    html += `<th>${esc(display)}</th>`;
+  colHeaders.forEach(l => {
+    html += `<th>${esc(displayParts(l.split('|')))}</th>`;
   });
-  if (displayColLabels.length > 1 && !isComma) html += '<th>Total</th>';
   html += '</tr></thead><tbody>';
 
   rowLabels.forEach(r => {
     if (r === totalLabel) return;
-    const display = r.split('|').join(' / ');
-    html += `<tr><td><strong>${esc(display)}</strong></td>`;
+    html += `<tr><td><strong>${esc(displayParts(r.split('|')))}</strong></td>`;
     let rowTotal = 0;
-    displayColLabels.forEach(c => {
-      if (c === 'Total') {
-        html += `<td>${isComma ? '' : rowTotal}</td>`;
-      } else {
-        const val = pivotMap.get(r)?.get(c);
-        if (isComma) {
-          html += `<td>${esc(Array.isArray(val) ? val.join(', ') : '')}</td>`;
-        } else {
-          let cellVal = val ?? 0;
-          rowTotal += cellVal;
-          html += `<td>${agg === 'avg' ? avgCellValue(filtered, rowKeys, colKeys, valKey, r, c) : cellVal}</td>`;
-        }
-      }
+    colLabels.forEach(c => {
+      const val = cellVal(r, c);
+      html += `<td>${val}</td>`;
+      if (!isComma) rowTotal += Number(val);
     });
-    if (displayColLabels.length > 1 && !isComma) html += `<td>${rowTotal}</td>`;
+    if (showTotals) html += `<td>${rowTotal}</td>`;
     html += '</tr>';
   });
 
-  if (rowLabels.length > 1 && !isComma) {
+  // Totals row
+  if (rowLabels.filter(r => r !== totalLabel).length > 1 && showTotals) {
     html += '<tr><td><strong>Total</strong></td>';
-    displayColLabels.forEach(c => {
+    colLabels.forEach(c => {
       let colTotal = 0;
       rowLabels.forEach(r => {
         if (r === totalLabel) return;
-        colTotal += pivotMap.get(r)?.get(c) ?? 0;
+        colTotal += Number(cellVal(r, c));
       });
       html += `<td>${colTotal}</td>`;
     });
-    if (displayColLabels.length > 1) {
-      let grandTotal = 0;
-      rowLabels.forEach(r => {
-        if (r === totalLabel) return;
-        displayColLabels.forEach(c => {
-          grandTotal += pivotMap.get(r)?.get(c) ?? 0;
-        });
+    let grandTotal = 0;
+    rowLabels.forEach(r => {
+      if (r === totalLabel) return;
+      colLabels.forEach(c => {
+        grandTotal += Number(cellVal(r, c));
       });
-      html += `<td>${grandTotal}</td>`;
-    }
-    html += '</tr>';
+    });
+    html += `<td>${grandTotal}</td></tr>`;
   }
 
   html += '</tbody></table>';
 
-  if (filtered.length === 0) {
-    pivotResult.innerHTML = '<p>No data to display.</p>';
-    pivotExportBar.classList.add('hidden');
-  } else {
-    pivotResult.innerHTML = html;
-    pivotExportBar.classList.remove('hidden');
-  }
+  pivotResult.innerHTML = filtered.length === 0 ? '<p>No data to display.</p>' : html;
+  pivotExportBar.classList.toggle('hidden', filtered.length === 0);
 });
 
 exportCsvBtn.addEventListener('click', () => {
@@ -1344,22 +1390,6 @@ copyTableBtn.addEventListener('click', () => {
   navigator.clipboard.write([item]);
   showPivotToast('✓ Copied to clipboard');
 });
-
-function avgCellValue(schemesList, rowKeys, colKeys, valKey, rowVal, colVal) {
-  const items = schemesList.filter(s => {
-    const e = getEffective(s.id);
-    const rv = rowKeys.map(k => String(getFieldValue(e, k) ?? '(blank)')).join('|');
-    const cv = colKeys.map(k => String(getFieldValue(e, k) ?? '(blank)')).join('|');
-    return rv === rowVal && cv === colVal;
-  });
-  if (!items.length) return 0;
-  const sum = items.reduce((acc, s) => {
-    const e = getEffective(s.id);
-    const v = Number(getFieldValue(e, valKey));
-    return acc + (isNaN(v) ? 0 : v);
-  }, 0);
-  return (sum / items.length).toFixed(2);
-}
 
 // ========== Import / Export ==========
 function exportJSON() {
@@ -1695,11 +1725,99 @@ function initScrollGlow(el, threshold = 4) {
   return update;
 }
 
-// Modals scroll as a whole (.modal has overflow-y: auto), so glow the modal box itself
+// Jump button factory: click jumps ~80% page, hold for continuous scroll
+function makeJumpBtn(dir, scrollEl, contextLabel) {
+  const btn = document.createElement('button');
+  btn.className = 'scroll-jump scroll-jump-' + dir;
+  btn.textContent = dir === 'top' ? '↑' : '↓';
+  btn.title = dir === 'top' ? 'Scroll to top' : 'Scroll to bottom';
+  btn.setAttribute('aria-label', (dir === 'top' ? 'Scroll to top' : 'Scroll to bottom') + ' of ' + contextLabel);
+
+  const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const scrollBehavior = prefersReduced ? 'instant' : 'smooth';
+
+  let holdTimer = null;
+  let holdInterval = null;
+  const HOLD_DELAY = 300;
+  const SCROLL_STEP = 30;
+
+  function doScroll() {
+    if (dir === 'top') scrollEl.scrollBy({ top: -scrollEl.clientHeight * 0.8, behavior: scrollBehavior });
+    else scrollEl.scrollBy({ top: scrollEl.clientHeight * 0.8, behavior: scrollBehavior });
+  }
+
+  function startHold() {
+    holdTimer = setTimeout(() => {
+      holdInterval = setInterval(() => {
+        if (dir === 'top') scrollEl.scrollBy({ top: -SCROLL_STEP });
+        else scrollEl.scrollBy({ top: SCROLL_STEP });
+      }, 30);
+      btn.classList.add('scroll-jump-active');
+    }, HOLD_DELAY);
+  }
+
+  function stopHold() {
+    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+    if (holdInterval) { clearInterval(holdInterval); holdInterval = null; }
+    btn.classList.remove('scroll-jump-active');
+  }
+
+  btn.addEventListener('click', e => { if (!holdTimer && !holdInterval) doScroll(); });
+  btn.addEventListener('mousedown', startHold);
+  btn.addEventListener('mouseup', stopHold);
+  btn.addEventListener('mouseleave', stopHold);
+  btn.addEventListener('touchstart', startHold, { passive: true });
+  btn.addEventListener('touchend', stopHold);
+  btn.addEventListener('touchcancel', stopHold);
+
+  return btn;
+}
+
+// Modal jump buttons
 ['schemeModal', 'pivotModal', 'detailModal', 'dataMenuModal', 'bulkModal'].forEach(id => {
   const overlay = document.getElementById(id);
   const modalEl = overlay && overlay.querySelector('.modal');
-  if (modalEl) initScrollGlow(modalEl);
+  if (!modalEl) return;
+  initScrollGlow(modalEl);
+  overlay.appendChild(makeJumpBtn('top', modalEl, id === 'schemeModal' ? 'form' : id === 'pivotModal' ? 'pivot table' : id === 'detailModal' ? 'details' : id === 'dataMenuModal' ? 'data menu' : 'bulk editor'));
+  overlay.appendChild(makeJumpBtn('bottom', modalEl, id === 'schemeModal' ? 'form' : id === 'pivotModal' ? 'pivot table' : id === 'detailModal' ? 'details' : id === 'dataMenuModal' ? 'data menu' : 'bulk editor'));
+});
+
+// Page-level jump buttons
+const pageScrollEl = document.documentElement;
+const pageUpBtn = makeJumpBtn('top', pageScrollEl, 'page');
+pageUpBtn.classList.add('scroll-jump-page');
+const pageDownBtn = makeJumpBtn('bottom', pageScrollEl, 'page');
+pageDownBtn.classList.add('scroll-jump-page');
+document.body.appendChild(pageUpBtn);
+document.body.appendChild(pageDownBtn);
+
+// Hide page jump buttons when any modal is open
+['schemeModal', 'pivotModal', 'detailModal', 'dataMenuModal', 'bulkModal'].forEach(id => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const obs = new MutationObserver(() => {
+    const open = !el.classList.contains('hidden');
+    pageUpBtn.classList.toggle('hidden', open);
+    pageDownBtn.classList.toggle('hidden', open);
+  });
+  obs.observe(el, { attributes: true, attributeFilter: ['class'] });
+});
+
+// Page Up/Down / Home/End for the topmost open modal
+document.addEventListener('keydown', e => {
+  const modals = document.querySelectorAll('.modal-overlay:not(.hidden)');
+  if (!modals.length) return;
+  const target = e.target;
+  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) return;
+  const modal = [...modals].pop().querySelector('.modal');
+  if (!modal) return;
+  switch (e.key) {
+    case 'PageDown': modal.scrollBy({ top: modal.clientHeight * 0.8, behavior: 'smooth' }); e.preventDefault(); break;
+    case 'PageUp': modal.scrollBy({ top: -modal.clientHeight * 0.8, behavior: 'smooth' }); e.preventDefault(); break;
+    case 'Home': modal.scrollTo({ top: 0, behavior: 'smooth' }); e.preventDefault(); break;
+    case 'End': modal.scrollTo({ top: modal.scrollHeight, behavior: 'smooth' }); e.preventDefault(); break;
+  }
 });
 
 // Smaller internal scroll areas

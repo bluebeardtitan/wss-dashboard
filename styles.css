@@ -618,8 +618,66 @@ body.selection-mode .card:hover {
 .bulk-hint {
   font-size: 0.8rem;
   color: var(--text-secondary);
-  font-style: italic;
-  margin-top: 12px;
+  margin-top: 4px;
+}
+
+/* ========== Bulk Grid ========== */
+.bulk-grid {
+  max-height: 55vh;
+  overflow: auto;
+}
+
+.bulk-grid-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.bulk-grid-table th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  padding: 8px 10px;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 2px solid var(--primary);
+  z-index: 1;
+  white-space: nowrap;
+}
+
+.bulk-grid-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.bulk-grid-scheme-col {
+  min-width: 160px;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--surface);
+}
+
+.bulk-grid-cell {
+  width: 100%;
+  min-width: 100px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.85rem;
+  outline: none;
+  transition: border var(--transition), box-shadow var(--transition);
+  box-sizing: border-box;
+}
+
+.bulk-grid-cell:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-light);
+  background: var(--surface);
 }
 
 /* ========== Form Fields ========== */
@@ -1636,4 +1694,86 @@ body.selection-mode .card:hover {
 .page-scroll-glow.visible {
   opacity: 1;
   animation: scrollGlowPulse 2.2s ease-in-out infinite;
+}
+
+/* ========== Scroll Jump Buttons ========== */
+.scroll-jump {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 1.3rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  z-index: 210;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  opacity: 0.75;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.scroll-jump:hover {
+  opacity: 1;
+  background: var(--primary-light);
+  color: var(--primary);
+  border-color: var(--primary);
+  box-shadow: 0 2px 10px rgba(37,99,235,0.2);
+}
+
+.scroll-jump:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
+.scroll-jump-active {
+  opacity: 1;
+  background: var(--primary-light);
+  color: var(--primary);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px var(--primary-light), 0 2px 10px rgba(37,99,235,0.2);
+  animation: scrollJumpPulse 0.6s ease-in-out infinite;
+}
+
+@keyframes scrollJumpPulse {
+  0%, 100% { box-shadow: 0 0 0 4px var(--primary-light), 0 2px 10px rgba(37,99,235,0.2); }
+  50% { box-shadow: 0 0 0 6px var(--primary-light), 0 2px 14px rgba(37,99,235,0.3); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scroll-jump-active {
+    animation: none;
+  }
+}
+
+.scroll-jump-top {
+  top: 8px;
+}
+
+.scroll-jump-bottom {
+  bottom: 8px;
+}
+
+.scroll-jump-page {
+  position: fixed;
+  right: 12px;
+  left: auto;
+  transform: none;
+}
+
+.scroll-jump-page.scroll-jump-top {
+  top: 60px;
+}
+
+.scroll-jump-page.scroll-jump-bottom {
+  bottom: 8px;
 }

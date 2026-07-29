@@ -269,27 +269,35 @@
 
   <!-- Bulk Fields Modal -->
   <div id="bulkModal" class="modal-overlay hidden">
-    <div class="modal">
+    <div class="modal modal-lg">
       <div class="modal-header">
         <h2 id="bulkModalTitle">Add/Edit Fields</h2>
         <button class="modal-close" id="bulkModalClose">&times;</button>
       </div>
       <div class="modal-body">
-        <p class="bulk-modal-desc" id="bulkModalDesc"></p>
-        <div class="field-group">
-          <div class="field-label">Fields to apply</div>
-          <datalist id="bulkFieldKeySuggestions"></datalist>
-          <div id="bulkDynamicFields"></div>
-          <div class="field-add-row">
-            <button class="btn btn-sm btn-outline" id="bulkAddFieldBtn">+ Add Field</button>
-            <button class="btn btn-sm btn-outline" id="bulkAddGroupBtn">📁 Add Group</button>
+        <div id="bulkStep1">
+          <p class="bulk-modal-desc" id="bulkModalDesc"></p>
+          <div class="field-group">
+            <div class="field-label">Fields to apply</div>
+            <datalist id="bulkFieldKeySuggestions"></datalist>
+            <div id="bulkDynamicFields"></div>
+            <div class="field-add-row">
+              <button class="btn btn-sm btn-outline" id="bulkAddFieldBtn">+ Add Field</button>
+              <button class="btn btn-sm btn-outline" id="bulkAddGroupBtn">📁 Add Group</button>
+            </div>
           </div>
+          <p class="bulk-hint">Existing fields with the same name will be overwritten. New fields will be added.</p>
         </div>
-        <p class="bulk-hint">Existing fields with the same name will be overwritten. New fields will be added.</p>
+        <div id="bulkStep2" class="hidden">
+          <p class="bulk-modal-desc">Enter values per scheme. Leave blank for null. <strong>Tab</strong> / <strong>arrow keys</strong> to navigate.</p>
+          <div id="bulkGrid" class="bulk-grid"></div>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" id="bulkModalCancel">Cancel</button>
-        <button class="btn btn-primary" id="bulkModalSave">Stage Changes</button>
+        <button class="btn btn-secondary hidden" id="bulkModalBack">← Back</button>
+        <button class="btn btn-primary" id="bulkModalNext">Next →</button>
+        <button class="btn btn-primary hidden" id="bulkModalSave">💾 Save All</button>
       </div>
     </div>
   </div>
