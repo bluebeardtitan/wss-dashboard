@@ -1580,18 +1580,48 @@ function ensureDriveToken() {
   return true;
 }
 
-async function driveListFiles(name) {
-  const q = encodeURIComponent(`name='${name}' and trashed=false`);
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)`, {
+const DRIVE_BACKUP_FOLDER = 'MAK-Projects/Scheme-DB-Dashboard';
+const DRIVE_BACKUP_FILE = 'scheme-database-backup.json';
+
+async function driveGetOrCreateFolder(path) {
+  const parts = path.split('/').filter(Boolean);
+  let parentId = 'root';
+  for (const part of parts) {
+    const q = encodeURIComponent(`name='${part}' and '${parentId}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'`);
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`, {
+      headers: { Authorization: 'Bearer ' + window._gdriveToken }
+    });
+    if (!res.ok) throw new Error('Drive folder lookup failed: ' + res.status);
+    const files = (await res.json()).files || [];
+    if (files.length > 0) {
+      parentId = files[0].id;
+    } else {
+      const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + window._gdriveToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: part, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] })
+      });
+      if (!createRes.ok) throw new Error('Drive folder create failed: ' + createRes.status);
+      parentId = (await createRes.json()).id;
+    }
+  }
+  return parentId;
+}
+
+async function driveListFiles(name, parentId) {
+  let q = `name='${name}' and trashed=false`;
+  if (parentId) q += ` and '${parentId}' in parents`;
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)`, {
     headers: { Authorization: 'Bearer ' + window._gdriveToken }
   });
   if (!res.ok) throw new Error('Drive list failed: ' + res.status);
   return (await res.json()).files || [];
 }
 
-async function driveUpload(name, data) {
-  const files = await driveListFiles(name);
+async function driveUpload(name, data, parentId) {
+  const files = await driveListFiles(name, parentId);
   const metadata = { name, mimeType: 'application/json' };
+  if (parentId) metadata.parents = [parentId];
   const body = JSON.stringify(data);
 
   if (files.length > 0) {
@@ -1618,8 +1648,8 @@ async function driveUpload(name, data) {
   }
 }
 
-async function driveDownload(name) {
-  const files = await driveListFiles(name);
+async function driveDownload(name, parentId) {
+  const files = await driveListFiles(name, parentId);
   if (files.length === 0) throw new Error('No backup found on Drive');
   const res = await fetch(`https://www.googleapis.com/drive/v3/files/${files[0].id}?alt=media`, {
     headers: { Authorization: 'Bearer ' + window._gdriveToken }
@@ -1636,7 +1666,8 @@ dataDrivePush.addEventListener('click', async () => {
       const e = getEffective(s.id);
       return { name: e.name, fields: e.fields, hiddenFields: e.hiddenFields, groups: e.groups || [], hidden: e.hidden, createdAt: e.createdAt };
     });
-    await driveUpload('scheme-database-backup.json', data);
+    const folderId = await driveGetOrCreateFolder(DRIVE_BACKUP_FOLDER);
+    await driveUpload(DRIVE_BACKUP_FILE, data, folderId);
     showToast('Synced to Google Drive');
   } catch (err) {
     console.error(err);
@@ -1648,7 +1679,8 @@ dataDrivePull.addEventListener('click', async () => {
   if (!ensureDriveToken()) return;
   closeDataMenuModal();
   try {
-    const data = await driveDownload('scheme-database-backup.json');
+    const folderId = await driveGetOrCreateFolder(DRIVE_BACKUP_FOLDER);
+    const data = await driveDownload(DRIVE_BACKUP_FILE, folderId);
     if (!Array.isArray(data) || !data.every(s => s.name)) {
       alert('Invalid backup format on Drive.');
       return;
