@@ -1015,10 +1015,10 @@ bulkModalNext.addEventListener('click', () => {
     if (!ok) return;
   }
 
+  const schemeIds = [...selectedIds];
   bulkStep2Title.textContent = 'Enter values per scheme';
   bulkStep2Desc.innerHTML = `${schemeIds.length} scheme${schemeIds.length === 1 ? '' : 's'} in this batch. Leave a cell blank for null. <strong>Tab</strong> / <strong>arrow keys</strong> to navigate.`;
 
-  const schemeIds = [...selectedIds];
   let gridHtml = '<table class="bulk-grid-table"><thead><tr><th class="bulk-grid-scheme-col">Scheme</th>';
   fieldKeys.forEach(k => gridHtml += `<th>${esc(k)}</th>`);
   gridHtml += '</tr></thead><tbody>';
