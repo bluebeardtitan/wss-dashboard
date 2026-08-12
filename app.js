@@ -67,10 +67,15 @@ let selectedIds = new Set();
 let pendingChanges = new Map();
 let newSchemeCounter = 0;
 
-function getEffective(id) {
+function findScheme(id) {
   const numId = Number(id);
-  const base = schemes.find(s => s.id === id || s.id === numId);
+  return schemes.find(s => s.id === id || s.id === numId);
+}
+
+function getEffective(id) {
+  const base = findScheme(id);
   if (!base) return null;
+  const numId = Number(id);
   const change = pendingChanges.get(id) || pendingChanges.get(numId) || pendingChanges.get(String(base.id));
   if (change) {
     return { ...base, ...change };
@@ -79,7 +84,7 @@ function getEffective(id) {
 }
 
 function stageChange(id, change) {
-  const base = schemes.find(s => s.id === id);
+  const base = findScheme(id);
   if (!base) return;
   const existing = pendingChanges.get(id) || {};
   pendingChanges.set(id, { ...existing, ...change });
@@ -91,6 +96,63 @@ function stageNewScheme(name, fields, hiddenFields, groups) {
   schemes.push({ id, name, fields: fields || {}, hiddenFields: hiddenFields || {}, groups: groups || [], hidden: false, createdAt: new Date().toISOString() });
   pendingChanges.set(id, { name, fields: fields || {}, hiddenFields: hiddenFields || {}, groups: groups || [] });
   render();
+}
+
+// ========== Shared Helpers ==========
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function toExportShape(e) {
+  return {
+    name: e.name,
+    fields: e.fields,
+    hiddenFields: e.hiddenFields,
+    groups: e.groups || [],
+    hidden: e.hidden,
+    createdAt: e.createdAt
+  };
+}
+
+function normalizeScheme(raw) {
+  return {
+    name: raw.name,
+    fields: raw.fields || {},
+    hiddenFields: raw.hiddenFields || {},
+    groups: raw.groups || [],
+    hidden: raw.hidden || false,
+    createdAt: raw.createdAt || new Date().toISOString()
+  };
+}
+
+function parseFieldRows(container) {
+  const groups = [];
+  const rows = [];
+  let currentGroup = null;
+  container.querySelectorAll('.dynamic-field-row, .dynamic-group-row').forEach(row => {
+    if (row.classList.contains('dynamic-group-row')) {
+      const gName = row.querySelector('.group-name-input').value.trim();
+      currentGroup = gName ? { name: gName, fieldKeys: [] } : null;
+      if (currentGroup) groups.push(currentGroup);
+      return;
+    }
+    const k = row.querySelector('.field-key-input').value.trim();
+    if (!k) return;
+    const valueInput = row.querySelector('.field-value-input');
+    const entry = {
+      key: k,
+      value: valueInput ? valueInput.value.trim() : '',
+      hidden: row.dataset.isHidden === 'true'
+    };
+    rows.push(entry);
+    if (currentGroup && !entry.hidden) currentGroup.fieldKeys.push(k);
+  });
+  return { rows, groups };
 }
 
 // ========== DOM refs ==========
@@ -128,13 +190,6 @@ const exportCsvBtn = document.getElementById('exportCsvBtn');
 const copyTableBtn = document.getElementById('copyTableBtn');
 const pivotExportBar = document.getElementById('pivotExportBar');
 const pivotToast = document.getElementById('pivotToast');
-
-function showPivotToast(msg) {
-  pivotToast.textContent = msg;
-  pivotToast.classList.remove('hidden');
-  clearTimeout(pivotToast._timer);
-  pivotToast._timer = setTimeout(() => pivotToast.classList.add('hidden'), 2000);
-}
 
 // Data Menu
 const dataMenuBtn = document.getElementById('dataMenuBtn');
@@ -190,6 +245,16 @@ const pendingCount = document.getElementById('pendingCount');
 const commitBtn = document.getElementById('commitBtn');
 const discardBtn = document.getElementById('discardBtn');
 
+// Detail
+const detailModal = document.getElementById('detailModal');
+const detailModalTitle = document.getElementById('detailModalTitle');
+const detailModalBody = document.getElementById('detailModalBody');
+const detailModalClose = document.getElementById('detailModalClose');
+const detailModalCloseBtn = document.getElementById('detailModalCloseBtn');
+const detailModalEdit = document.getElementById('detailModalEdit');
+const detailSearchInput = document.getElementById('detailSearchInput');
+const detailFieldCount = document.getElementById('detailFieldCount');
+
 // ========== Theme ==========
 const savedTheme = localStorage.getItem('theme') || 'light';
 document.documentElement.setAttribute('data-theme', savedTheme);
@@ -210,6 +275,13 @@ function showToast(msg) {
   t.textContent = msg;
   document.body.appendChild(t);
   setTimeout(() => t.remove(), 2500);
+}
+
+function showPivotToast(msg) {
+  pivotToast.textContent = msg;
+  pivotToast.classList.remove('hidden');
+  clearTimeout(pivotToast._timer);
+  pivotToast._timer = setTimeout(() => pivotToast.classList.add('hidden'), 2000);
 }
 
 // ========== Selection Mode ==========
@@ -372,47 +444,62 @@ function render() {
       </div>
     `;
   }).join('');
-
-  // Re-bind card events
-  cardsContainer.querySelectorAll('.card').forEach(card => {
-    const id = card.dataset.id;
-    const numId = Number(id);
-    const schemeId = isNaN(numId) ? id : numId;
-
-    card.querySelector('.edit-btn').addEventListener('click', e => { e.stopPropagation(); editScheme(schemeId); });
-    card.querySelector('.dup-btn').addEventListener('click', e => { e.stopPropagation(); duplicateScheme(schemeId); });
-    card.querySelector('.hide-btn').addEventListener('click', e => { e.stopPropagation(); toggleHideScheme(schemeId); });
-    card.querySelector('.card-name-more')?.addEventListener('click', e => {
-      e.preventDefault();
-      e.stopPropagation();
-      const h3 = e.target.closest('h3');
-      const e2 = getEffective(schemeId);
-      h3.innerHTML = esc(e2.name);
-      h3.classList.remove('card-name-truncated');
-    });
-    card.querySelector('.card-view-more')?.addEventListener('click', () => openDetailModal(schemeId));
-
-    // Long press to enter selection
-    card.addEventListener('pointerdown', e => {
-      if (e.target.closest('.card-actions')) return;
-      longPressTimer = setTimeout(() => {
-        longPressTimer = null;
-        enterSelectionMode(schemeId);
-      }, LONG_PRESS_MS);
-    });
-    card.addEventListener('pointerup', () => { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } });
-    card.addEventListener('pointerleave', () => { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } });
-
-    card.addEventListener('click', e => {
-      if (e.target.closest('.card-actions')) return;
-      if (selectionMode) {
-        toggleSelect(schemeId);
-      } else {
-        openDetailModal(schemeId);
-      }
-    });
-  });
 }
+
+// Card actions are bound once here via delegation; render() only writes innerHTML.
+function cardIdFrom(target) {
+  const card = target.closest('.card');
+  if (!card) return null;
+  const numId = Number(card.dataset.id);
+  return isNaN(numId) ? card.dataset.id : numId;
+}
+
+function clearLongPress() {
+  if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+}
+
+cardsContainer.addEventListener('click', e => {
+  const schemeId = cardIdFrom(e.target);
+  if (schemeId === null) return;
+
+  if (e.target.closest('.edit-btn')) { e.stopPropagation(); editScheme(schemeId); return; }
+  if (e.target.closest('.dup-btn')) { e.stopPropagation(); duplicateScheme(schemeId); return; }
+  if (e.target.closest('.hide-btn')) { e.stopPropagation(); toggleHideScheme(schemeId); return; }
+  if (e.target.closest('.card-name-more')) {
+    e.preventDefault();
+    e.stopPropagation();
+    const h3 = e.target.closest('h3');
+    h3.innerHTML = esc(getEffective(schemeId).name);
+    h3.classList.remove('card-name-truncated');
+    return;
+  }
+  if (e.target.closest('.card-view-more')) { openDetailModal(schemeId); return; }
+  if (e.target.closest('.card-actions')) return;
+
+  if (selectionMode) toggleSelect(schemeId);
+  else openDetailModal(schemeId);
+});
+
+cardsContainer.addEventListener('pointerdown', e => {
+  if (e.target.closest('.card-actions')) return;
+  const schemeId = cardIdFrom(e.target);
+  if (schemeId === null) return;
+  const card = e.target.closest('.card');
+  const onCancel = () => { clearLongPress(); cleanup(); };
+  const cleanup = () => {
+    card.removeEventListener('pointerleave', onCancel);
+    card.removeEventListener('pointerup', onCancel);
+    card.removeEventListener('pointercancel', onCancel);
+  };
+  card.addEventListener('pointerleave', onCancel);
+  card.addEventListener('pointerup', onCancel);
+  card.addEventListener('pointercancel', onCancel);
+  longPressTimer = setTimeout(() => {
+    longPressTimer = null;
+    cleanup();
+    enterSelectionMode(schemeId);
+  }, LONG_PRESS_MS);
+});
 
 function esc(str) {
   const d = document.createElement('div');
@@ -718,33 +805,14 @@ function collectFieldData() {
     alert('Scheme name is required');
     return null;
   }
+  const { rows, groups } = parseFieldRows(dynamicFields);
   const fields = {};
   const hiddenFields = {};
-  const groups = [];
-  let currentGroup = null;
-
-  dynamicFields.querySelectorAll('.dynamic-field-row, .dynamic-group-row').forEach(row => {
-    if (row.classList.contains('dynamic-group-row')) {
-      const gName = row.querySelector('.group-name-input').value.trim();
-      if (gName) {
-        currentGroup = { name: gName, fields: [] };
-        groups.push(currentGroup);
-      } else {
-        currentGroup = null;
-      }
-      return;
-    }
-    const k = row.querySelector('.field-key-input').value.trim();
-    const v = row.querySelector('.field-value-input').value.trim();
-    if (!k) return;
-    if (row.dataset.isHidden === 'true') {
-      hiddenFields[k] = v;
-    } else {
-      fields[k] = v;
-      if (currentGroup) currentGroup.fields.push(k);
-    }
+  rows.forEach(r => {
+    if (r.hidden) hiddenFields[r.key] = r.value;
+    else fields[r.key] = r.value;
   });
-  return { name, fields, hiddenFields, groups };
+  return { name, fields, hiddenFields, groups: groups.map(g => ({ name: g.name, fields: g.fieldKeys })) };
 }
 
 addSchemeBtn.addEventListener('click', () => openModal());
@@ -784,15 +852,6 @@ schemeNameInput.addEventListener('keydown', e => {
 });
 
 // ========== Detail Modal ==========
-const detailModal = document.getElementById('detailModal');
-const detailModalTitle = document.getElementById('detailModalTitle');
-const detailModalBody = document.getElementById('detailModalBody');
-const detailModalClose = document.getElementById('detailModalClose');
-const detailModalCloseBtn = document.getElementById('detailModalCloseBtn');
-const detailModalEdit = document.getElementById('detailModalEdit');
-const detailSearchInput = document.getElementById('detailSearchInput');
-const detailFieldCount = document.getElementById('detailFieldCount');
-
 let detailSchemeId = null;
 let detailEntries = [];
 let detailGroups = [];
@@ -869,9 +928,11 @@ detailModalEdit.addEventListener('click', () => {
 });
 
 // ========== Search ==========
+let searchTimer = null;
 searchInput.addEventListener('input', e => {
   searchQuery = e.target.value;
-  render();
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => render(), 100);
 });
 
 // ========== Bulk Operations ==========
@@ -898,14 +959,13 @@ bulkDeleteBtn.addEventListener('click', () => {
 // ========== Bulk Fields Modal ==========
 let bulkFieldRowIndex = 0;
 
-function addBulkFieldRow(key = '', value = '') {
+function addBulkFieldRow(key = '') {
   const idx = bulkFieldRowIndex++;
   const row = document.createElement('div');
   row.className = 'dynamic-field-row';
   row.innerHTML = `
     <span class="drag-handle" draggable="true">⠿</span>
     <input type="text" class="field-key-input" name="bulk_field_key_${idx}" placeholder="Field name" value="${esc(key)}" list="bulkFieldKeySuggestions" />
-    <input type="text" class="field-value-input" name="bulk_field_value_${idx}" placeholder="Value" value="${esc(value)}" />
     <button class="remove-field" type="button">&times;</button>
   `;
   row.querySelector('.remove-field').addEventListener('click', () => row.remove());
@@ -972,23 +1032,9 @@ bulkAddFieldBtn.addEventListener('click', () => addBulkFieldRow('', ''));
 bulkAddGroupBtn.addEventListener('click', () => addBulkGroupRow(''));
 
 bulkModalNext.addEventListener('click', () => {
-  const fieldKeys = [];
-  const groupsData = [];
-  let currentGroup = null;
-
-  bulkDynamicFields.querySelectorAll('.dynamic-field-row, .dynamic-group-row').forEach(row => {
-    if (row.classList.contains('dynamic-group-row')) {
-      const gName = row.querySelector('.group-name-input').value.trim();
-      currentGroup = gName ? { name: gName, fields: [] } : null;
-      if (currentGroup) groupsData.push(currentGroup);
-      return;
-    }
-    const k = row.querySelector('.field-key-input').value.trim();
-    if (k) {
-      fieldKeys.push(k);
-      if (currentGroup) currentGroup.fields.push(k);
-    }
-  });
+  const { rows, groups } = parseFieldRows(bulkDynamicFields);
+  const fieldKeys = rows.map(r => r.key);
+  const groupsData = groups.map(g => ({ name: g.name, fields: g.fieldKeys }));
 
   if (fieldKeys.length === 0) {
     alert('Add at least one field first.');
@@ -1083,23 +1129,9 @@ bulkModalBack.addEventListener('click', () => {
 });
 
 bulkModalSave.addEventListener('click', () => {
-  const fieldKeys = [];
-  const groupsData = [];
-  let currentGroup = null;
-
-  bulkDynamicFields.querySelectorAll('.dynamic-field-row, .dynamic-group-row').forEach(row => {
-    if (row.classList.contains('dynamic-group-row')) {
-      const gName = row.querySelector('.group-name-input').value.trim();
-      currentGroup = gName ? { name: gName, fields: [] } : null;
-      if (currentGroup) groupsData.push(currentGroup);
-      return;
-    }
-    const k = row.querySelector('.field-key-input').value.trim();
-    if (k) {
-      fieldKeys.push(k);
-      if (currentGroup) currentGroup.fields.push(k);
-    }
-  });
+  const { rows, groups } = parseFieldRows(bulkDynamicFields);
+  const fieldKeys = rows.map(r => r.key);
+  const groupsData = groups.map(g => ({ name: g.name, fields: g.fieldKeys }));
 
   bulkGrid.querySelectorAll('tr[data-scheme-id]').forEach(tr => {
     const id = tr.dataset.schemeId;
@@ -1142,7 +1174,7 @@ commitBtn.addEventListener('click', async () => {
       const newId = await dbAdd(schemeData);
       committed++;
     } else {
-      const base = schemes.find(s => s.id === id);
+      const base = findScheme(id);
       if (!base) continue;
       const merged = { ...base, ...changes };
       await dbUpdate(merged);
@@ -1222,6 +1254,36 @@ function getFieldValue(scheme, fieldKey) {
   return scheme.fields ? scheme.fields[fieldKey] : undefined;
 }
 
+// Pure aggregation: buckets records into pivotMap (count/sum/comma) plus
+// incremental sum/count maps used for avg. O(n), single pass over records.
+function aggregateRecords(records, agg) {
+  const pivotMap = new Map();
+  const sumMap = new Map();
+  const countMap = new Map();
+  const isComma = agg === 'comma' || agg === 'comma-distinct';
+
+  records.forEach(r => {
+    const k = r.rowKey + '||' + r.colKey;
+    if (isComma) {
+      const str = String(r.rawVal ?? '');
+      if (!str) return;
+      if (!pivotMap.has(k)) pivotMap.set(k, []);
+      const arr = pivotMap.get(k);
+      if (agg === 'comma-distinct' ? !arr.includes(str) : true) arr.push(str);
+      return;
+    }
+    if (agg === 'avg') {
+      sumMap.set(k, (sumMap.get(k) || 0) + (isNaN(Number(r.rawVal)) ? 0 : Number(r.rawVal)));
+      countMap.set(k, (countMap.get(k) || 0) + 1);
+      return;
+    }
+    const num = agg === 'count' ? 1 : (isNaN(Number(r.rawVal)) ? 0 : Number(r.rawVal));
+    pivotMap.set(k, (pivotMap.get(k) || 0) + num);
+  });
+
+  return { pivotMap, sumMap, countMap };
+}
+
 generatePivotBtn.addEventListener('click', () => {
   const rowKeys = getCheckedValues(pivotRows);
   const colKeys = getCheckedValues(pivotCols);
@@ -1253,21 +1315,8 @@ generatePivotBtn.addEventListener('click', () => {
     records.push({ rowKey, colKey, rawVal, rowParts, colParts });
   });
 
-  // Aggregate into pivotMap: rowKey|colKey -> aggregated value
-  const pivotMap = new Map();
-  records.forEach(r => {
-    const k = r.rowKey + '||' + r.colKey;
-    if (isComma) {
-      const str = String(r.rawVal ?? '');
-      if (!str) return;
-      if (!pivotMap.has(k)) pivotMap.set(k, []);
-      const arr = pivotMap.get(k);
-      if (agg === 'comma-distinct' ? !arr.includes(str) : true) arr.push(str);
-    } else {
-      const num = agg === 'count' ? 1 : (isNaN(Number(r.rawVal)) ? 0 : Number(r.rawVal));
-      pivotMap.set(k, (pivotMap.get(k) || 0) + num);
-    }
-  });
+  // Aggregate records into per-cell buckets: sum/count/avg/comma handled once here
+  const { pivotMap, sumMap, countMap } = aggregateRecords(records, agg);
 
   // Unique row / column labels
   const rowSet = new Set(records.map(r => r.rowKey));
@@ -1284,12 +1333,12 @@ generatePivotBtn.addEventListener('click', () => {
     return v;
   }
 
-  // For avg aggregation, recompute average from raw records
+  // For avg aggregation, average was accumulated incrementally during aggregation
   function getAvg(rowKey, colKey) {
-    const items = records.filter(r => r.rowKey === rowKey && r.colKey === colKey);
-    if (!items.length) return 0;
-    const sum = items.reduce((acc, r) => acc + (isNaN(Number(r.rawVal)) ? 0 : Number(r.rawVal)), 0);
-    return (sum / items.length).toFixed(2);
+    const k = rowKey + '||' + colKey;
+    const sum = sumMap.get(k);
+    if (sum === undefined) return 0;
+    return (sum / countMap.get(k)).toFixed(2);
   }
 
   function cellVal(rowKey, colKey) {
@@ -1392,12 +1441,7 @@ exportCsvBtn.addEventListener('click', () => {
 
   const csv = rows.map(r => r.join(',')).join('\n');
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'pivot-table.csv';
-  a.click();
-  URL.revokeObjectURL(url);
+  downloadBlob(blob, 'pivot-table.csv');
   showPivotToast('✓ CSV downloaded');
 });
 
@@ -1430,24 +1474,9 @@ copyTableBtn.addEventListener('click', () => {
 
 // ========== Import / Export ==========
 function exportJSON() {
-  const data = schemes.map(s => {
-    const e = getEffective(s.id);
-    return {
-      name: e.name,
-      fields: e.fields,
-      hiddenFields: e.hiddenFields,
-      groups: e.groups || [],
-      hidden: e.hidden,
-      createdAt: e.createdAt
-    };
-  });
+  const data = schemes.map(s => toExportShape(getEffective(s.id)));
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `schemes-${new Date().toISOString().slice(0, 10)}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
+  downloadBlob(blob, `schemes-${new Date().toISOString().slice(0, 10)}.json`);
   showToast('Data exported');
 }
 
@@ -1465,14 +1494,7 @@ function importJSON(file) {
         await dbClear();
       }
       for (const s of data) {
-        await dbAdd({
-          name: s.name,
-          fields: s.fields || {},
-          hiddenFields: s.hiddenFields || {},
-          groups: s.groups || [],
-          hidden: s.hidden || false,
-          createdAt: s.createdAt || new Date().toISOString()
-        });
+        await dbAdd(normalizeScheme(s));
       }
       await loadSchemes();
       showToast(`Imported ${data.length} scheme${data.length !== 1 ? 's' : ''}`);
@@ -1560,13 +1582,13 @@ function getRedirectUri() {
 }
 
 function oauthSignIn() {
-  var clientId = getDriveClientId();
+  const clientId = getDriveClientId();
 
-  var form = document.createElement('form');
+  const form = document.createElement('form');
   form.setAttribute('method', 'GET');
   form.setAttribute('action', 'https://accounts.google.com/o/oauth2/v2/auth');
 
-  var params = {
+  const params = {
     'client_id': clientId,
     'redirect_uri': getRedirectUri(),
     'response_type': 'token',
@@ -1575,8 +1597,8 @@ function oauthSignIn() {
     'prompt': 'consent'
   };
 
-  for (var p in params) {
-    var input = document.createElement('input');
+  for (const p in params) {
+    const input = document.createElement('input');
     input.setAttribute('type', 'hidden');
     input.setAttribute('name', p);
     input.setAttribute('value', params[p]);
@@ -1588,11 +1610,11 @@ function oauthSignIn() {
 }
 
 function extractTokenFromHash() {
-  var hash = window.location.hash;
+  const hash = window.location.hash;
   if (!hash || !hash.includes('access_token')) return;
-  var params = new URLSearchParams(hash.substring(1));
-  var token = params.get('access_token');
-  var expiresIn = parseInt(params.get('expires_in') || '3600', 10);
+  const params = new URLSearchParams(hash.substring(1));
+  const token = params.get('access_token');
+  const expiresIn = parseInt(params.get('expires_in') || '3600', 10);
   if (token) {
     saveDriveToken(token, expiresIn);
     window.history.replaceState(null, '', window.location.pathname + window.location.search);
@@ -1699,10 +1721,7 @@ dataDrivePush.addEventListener('click', async () => {
   if (!ensureDriveToken()) return;
   closeDataMenuModal();
   try {
-    const data = schemes.map(s => {
-      const e = getEffective(s.id);
-      return { name: e.name, fields: e.fields, hiddenFields: e.hiddenFields, groups: e.groups || [], hidden: e.hidden, createdAt: e.createdAt };
-    });
+    const data = schemes.map(s => toExportShape(getEffective(s.id)));
     const folderId = await driveGetOrCreateFolder(DRIVE_BACKUP_FOLDER);
     await driveUpload(DRIVE_BACKUP_FILE, data, folderId);
     showToast('Synced to Google Drive');
@@ -1725,14 +1744,7 @@ dataDrivePull.addEventListener('click', async () => {
     const mode = confirm('Click OK to replace all local data, or Cancel to append.');
     if (mode) await dbClear();
     for (const s of data) {
-      await dbAdd({
-        name: s.name,
-        fields: s.fields || {},
-        hiddenFields: s.hiddenFields || {},
-        groups: s.groups || [],
-        hidden: s.hidden || false,
-        createdAt: s.createdAt || new Date().toISOString()
-      });
+      await dbAdd(normalizeScheme(s));
     }
     await loadSchemes();
     showToast(`Synced ${data.length} scheme${data.length !== 1 ? 's' : ''} from Drive`);
