@@ -173,6 +173,9 @@ const bulkModalBack = document.getElementById('bulkModalBack');
 const bulkStep1 = document.getElementById('bulkStep1');
 const bulkStep2 = document.getElementById('bulkStep2');
 const bulkGrid = document.getElementById('bulkGrid');
+const bulkBatchChips = document.getElementById('bulkBatchChips');
+const bulkStep2Title = document.getElementById('bulkStep2Title');
+const bulkStep2Desc = document.getElementById('bulkStep2Desc');
 
 // Copy from
 const copyFromSelect = document.getElementById('copyFromSelect');
@@ -941,6 +944,12 @@ function openBulkModal() {
   bulkGroupRowIndex = 0;
   updateBulkFieldSuggestions();
   addBulkFieldRow('', '');
+  bulkBatchChips.innerHTML = [...selectedIds]
+    .map(id => {
+      const e = getEffective(id);
+      return `<span class="bulk-chip">${esc(e ? e.name : '(unknown)')}</span>`;
+    })
+    .join('');
   bulkStep1.classList.remove('hidden');
   bulkStep2.classList.add('hidden');
   bulkModalNext.classList.remove('hidden');
@@ -986,6 +995,29 @@ bulkModalNext.addEventListener('click', () => {
     return;
   }
 
+  const affected = [];
+  for (const id of selectedIds) {
+    const e = getEffective(id);
+    if (!e || !e.fields) continue;
+    for (const k of fieldKeys) {
+      if (e.fields[k] !== undefined && e.fields[k] !== '') {
+        affected.push({ scheme: e.name, field: k, value: e.fields[k] });
+      }
+    }
+  }
+  if (affected.length > 0) {
+    const sample = affected.slice(0, 6).map(a => `• ${a.scheme} → "${a.field}" = "${a.value}"`).join('\n');
+    const extra = affected.length > 6 ? `\n…and ${affected.length - 6} more.` : '';
+    const ok = confirm(
+      `${affected.length} existing field value(s) will be OVERWRITTEN:\n\n${sample}${extra}\n\n` +
+      `Entering a field name that already exists updates that field's values instead of adding a new one. Continue?`
+    );
+    if (!ok) return;
+  }
+
+  bulkStep2Title.textContent = 'Enter values per scheme';
+  bulkStep2Desc.innerHTML = `${schemeIds.length} scheme${schemeIds.length === 1 ? '' : 's'} in this batch. Leave a cell blank for null. <strong>Tab</strong> / <strong>arrow keys</strong> to navigate.`;
+
   const schemeIds = [...selectedIds];
   let gridHtml = '<table class="bulk-grid-table"><thead><tr><th class="bulk-grid-scheme-col">Scheme</th>';
   fieldKeys.forEach(k => gridHtml += `<th>${esc(k)}</th>`);
@@ -994,10 +1026,11 @@ bulkModalNext.addEventListener('click', () => {
   schemeIds.forEach((id, si) => {
     const e = getEffective(id);
     gridHtml += `<tr data-scheme-id="${esc(id)}">`;
-    gridHtml += `<td class="bulk-grid-scheme-col"><strong>${esc(e ? e.name : '(unknown)')}</strong></td>`;
+    gridHtml += `<td class="bulk-grid-scheme-col"><span class="bulk-scheme-marker">▸</span><strong class="bulk-scheme-name">${esc(e ? e.name : '(unknown)')}</strong></td>`;
     fieldKeys.forEach((k, fi) => {
       const existing = e && e.fields ? (e.fields[k] || '') : '';
-      gridHtml += `<td><input type="text" class="bulk-grid-cell" data-fi="${fi}" data-si="${si}" value="${esc(existing)}" /></td>`;
+      const hasExisting = e && e.fields && e.fields[k] !== undefined && e.fields[k] !== '';
+      gridHtml += `<td><input type="text" class="bulk-grid-cell${hasExisting ? ' bulk-cell-existing' : ''}" data-fi="${fi}" data-si="${si}" value="${esc(existing)}"${hasExisting ? ` title="Existing value: ${esc(existing)}"` : ''} /></td>`;
     });
     gridHtml += '</tr>';
   });
@@ -1011,6 +1044,10 @@ bulkModalNext.addEventListener('click', () => {
   bulkModalSave.classList.remove('hidden');
 
   bulkGrid.querySelectorAll('.bulk-grid-cell').forEach(cell => {
+    cell.addEventListener('focus', () => {
+      bulkGrid.querySelectorAll('tr.bulk-row-active').forEach(tr => tr.classList.remove('bulk-row-active'));
+      cell.closest('tr').classList.add('bulk-row-active');
+    });
     cell.addEventListener('keydown', e => {
       const fi = parseInt(cell.dataset.fi);
       const si = parseInt(cell.dataset.si);
