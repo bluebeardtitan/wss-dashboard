@@ -83,11 +83,19 @@ function getEffective(id) {
   return { ...base };
 }
 
+function isNewId(id) {
+  return typeof id === 'string' && isNaN(Number(id));
+}
+
 function stageChange(id, change) {
   const base = findScheme(id);
   if (!base) return;
-  const existing = pendingChanges.get(id) || {};
-  pendingChanges.set(id, { ...existing, ...change });
+  // Existing schemes are keyed by their numeric id so commit() can tell them
+  // apart from new (_new_N) schemes even when the caller passes a string id.
+  const numId = Number(id);
+  const key = isNaN(numId) ? id : numId;
+  const existing = pendingChanges.get(key) || pendingChanges.get(id) || {};
+  pendingChanges.set(key, { ...existing, ...change });
   render();
 }
 
@@ -344,7 +352,7 @@ function render() {
   showHiddenBtn.classList.toggle('active', showHidden);
 
   const pendingCount = schemes.filter(s => pendingChanges.has(s.id)).length;
-  const newPending = [...pendingChanges.keys()].filter(k => typeof k === 'string').length;
+  const newPending = [...pendingChanges.keys()].filter(isNewId).length;
   const totalPending = pendingCount + newPending;
 
   statsBar.textContent = `${filtered.length} of ${visibleSchemes.length} scheme${visibleSchemes.length !== 1 ? 's' : ''}${showHidden && hiddenCount ? ` (${hiddenCount} hidden)` : ''}${totalPending ? ` — ${totalPending} unsaved` : ''}`;
@@ -1167,7 +1175,7 @@ commitBtn.addEventListener('click', async () => {
   const count = pendingChanges.size;
   let committed = 0;
   for (const [id, changes] of pendingChanges) {
-    const isNew = typeof id === 'string';
+    const isNew = isNewId(id);
     if (isNew) {
       const { id: _discard, ...schemeData } = { id: 0, ...getEffective(id) };
       delete schemeData.id;
@@ -1191,7 +1199,7 @@ discardBtn.addEventListener('click', () => {
   if (!confirm(`Discard ${pendingChanges.size} pending change(s)?`)) return;
   // Remove any new (unsaved) schemes from the in-memory list
   for (const id of pendingChanges.keys()) {
-    if (typeof id === 'string') {
+    if (isNewId(id)) {
       schemes = schemes.filter(s => s.id !== id);
     }
   }
