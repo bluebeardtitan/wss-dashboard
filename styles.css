@@ -151,6 +151,17 @@ header {
   box-shadow: 0 0 0 3px var(--primary-light);
 }
 
+/* Expression search: red ring while the query looks like an expression but
+   does not compile; stats bar explains. */
+.search-wrapper.search-invalid input {
+  border-color: var(--danger);
+}
+
+.search-wrapper.search-invalid input:focus {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px rgba(239,68,68,0.15);
+}
+
 .search-icon {
   position: absolute;
   left: 14px;
@@ -907,6 +918,24 @@ tr.bulk-row-active td:not(.bulk-grid-scheme-col) {
   border-radius: var(--radius-sm);
   padding: 4px;
   margin-bottom: 8px;
+}
+
+/* Tag rows: same skeleton as field rows, amber-marked so they read as
+   badges-in-waiting rather than ordinary fields. */
+.tag-row .row-type-icon {
+  font-size: 0.95rem;
+  flex-shrink: 0;
+}
+
+.tag-row .field-key-input {
+  flex: 0 1 220px;
+  border-color: rgba(245,158,11,0.55);
+  font-weight: 600;
+}
+
+.tag-row .field-key-input:focus {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245,158,11,0.18);
 }
 
 .hidden-fields-toggle {

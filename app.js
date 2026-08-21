@@ -153,7 +153,17 @@ function parseFieldRows(container) {
     if (!k) return;
     // Link rows created via "Add Link" get the → marker applied on save,
     // unless the user already typed a → or @ prefix themselves.
-    if (row.classList.contains('link-row') && !isLinkKey(k)) k = '→ ' + k;
+    if (row.classList.contains('link-row')) {
+      if (!isLinkKey(k)) k = '→ ' + k;
+    } else if (row.classList.contains('tag-row')) {
+      // Tag rows always save with exactly one # marker, however the name
+      // was typed.
+      k = '#' + k.replace(/^#+\s*/, '');
+    } else {
+      // Plain field rows no longer create tags: a typed # is stripped, so
+      // "Add Tag" is the only way to make one.
+      k = k.replace(/^#+\s*/, '');
+    }
     const valueInput = row.querySelector('.field-value-input');
     const entry = {
       key: k,
@@ -171,6 +181,7 @@ const cardsContainer = document.getElementById('cardsContainer');
 const emptyState = document.getElementById('emptyState');
 const statsBar = document.getElementById('statsBar');
 const searchInput = document.getElementById('searchInput');
+const searchWrapper = document.getElementById('searchWrapper');
 const themeToggle = document.getElementById('themeToggle');
 const addSchemeBtn = document.getElementById('addSchemeBtn');
 const schemeModal = document.getElementById('schemeModal');
@@ -180,6 +191,7 @@ const dynamicFields = document.getElementById('dynamicFields');
 const addFieldBtn = document.getElementById('addFieldBtn');
 const addGroupBtn = document.getElementById('addGroupBtn');
 const addLinkBtn = document.getElementById('addLinkBtn');
+const addTagBtn = document.getElementById('addTagBtn');
 const modalSave = document.getElementById('modalSave');
 const modalCancel = document.getElementById('modalCancel');
 const modalClose = document.getElementById('modalClose');
@@ -234,6 +246,7 @@ const bulkDynamicFields = document.getElementById('bulkDynamicFields');
 const bulkAddFieldBtn = document.getElementById('bulkAddFieldBtn');
 const bulkAddGroupBtn = document.getElementById('bulkAddGroupBtn');
 const bulkAddLinkBtn = document.getElementById('bulkAddLinkBtn');
+const bulkAddTagBtn = document.getElementById('bulkAddTagBtn');
 const bulkModalCancel = document.getElementById('bulkModalCancel');
 const bulkModalSave = document.getElementById('bulkModalSave');
 const bulkModalNext = document.getElementById('bulkModalNext');
@@ -344,14 +357,9 @@ function updatePendingBar() {
 // ========== Render ==========
 function render() {
   const visibleSchemes = schemes.filter(s => showHidden ? true : !s.hidden);
-  const filtered = visibleSchemes.filter(s => {
-    const e = getEffective(s.id);
-    return e.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      Object.entries(e.fields || {}).some(([k, v]) =>
-        k.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        String(v).toLowerCase().includes(searchQuery.toLowerCase())
-      );
-  });
+  const filtered = visibleSchemes.filter(s => schemeMatchesQuery(getEffective(s.id)));
+  const searchInvalid = !!(searchQuery.trim() && compileSearchQuery(searchQuery.trim())?.invalid);
+  searchWrapper.classList.toggle('search-invalid', searchInvalid);
 
   const hiddenCount = schemes.filter(s => s.hidden).length;
   showHiddenCount.textContent = hiddenCount;
@@ -361,7 +369,7 @@ function render() {
   const newPending = [...pendingChanges.keys()].filter(isNewId).length;
   const totalPending = pendingCount + newPending;
 
-  statsBar.textContent = `${filtered.length} of ${visibleSchemes.length} scheme${visibleSchemes.length !== 1 ? 's' : ''}${showHidden && hiddenCount ? ` (${hiddenCount} hidden)` : ''}${totalPending ? ` — ${totalPending} unsaved` : ''}`;
+  statsBar.textContent = `${filtered.length} of ${visibleSchemes.length} scheme${visibleSchemes.length !== 1 ? 's' : ''}${showHidden && hiddenCount ? ` (${hiddenCount} hidden)` : ''}${totalPending ? ` — ${totalPending} unsaved` : ''}${searchInvalid ? ' — invalid expression' : ''}`;
 
   updatePendingBar();
 
@@ -546,8 +554,58 @@ function linkLabel(k) {
   return String(k).replace(/^[→@]\s*/, '');
 }
 
+// A tag field is any field whose key starts with #. Like links, the prefix
+// is a storage marker: users create tags with the "Add Tag" button and never
+// type the # themselves — parseFieldRows applies it on save.
+const TAG_KEY_RE = /^#/;
+
+function isTagKey(k) {
+  return TAG_KEY_RE.test(String(k));
+}
+
+function tagLabel(k) {
+  return String(k).replace(/^#\s*/, '');
+}
+
+function knownSchemeNameSet() {
+  const set = new Set();
+  schemes.forEach(s => {
+    const n = (getEffective(s.id).name || '').trim().toLowerCase();
+    if (n) set.add(n);
+  });
+  return set;
+}
+
+// Values are comma-joined names, but names may contain commas too ("Bore
+// Well, Main"), so a plain split shreds one target into fragments. Rebuild:
+// keep fragments that already match a real scheme, then greedily rejoin runs
+// of leftovers longest-first until the joined text matches. When both
+// readings are valid the single-target reading wins, since multi-link lists
+// are the common case; anything unmatched stays a fragment and renders as an
+// unresolved chip. Stored text is never rewritten by this.
 function parseLinkTargets(v) {
-  return String(v || '').split(',').map(s => s.trim()).filter(Boolean);
+  const parts = String(v || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!parts.length) return [];
+  const known = knownSchemeNameSet();
+  const out = [];
+  let i = 0;
+  while (i < parts.length) {
+    if (known.has(parts[i].toLowerCase())) {
+      out.push(parts[i]);
+      i++;
+      continue;
+    }
+    let j = parts.length;
+    while (j > i + 1 && !known.has(parts.slice(i, j).join(', ').toLowerCase())) j--;
+    if (j > i + 1) {
+      out.push(parts.slice(i, j).join(', '));
+      i = j;
+    } else {
+      out.push(parts[i]);
+      i++;
+    }
+  }
+  return out;
 }
 
 // esc() escapes <>& but not quotes; use this for attribute values.
@@ -652,9 +710,12 @@ function openModal(scheme = null) {
   if (entries.length === 0 && hiddenEntries.length === 0 && groups.length === 0) {
     addFieldRow('', '');
   } else {
-    // Link fields get the token-chip editor; everything else a plain row.
+    // Link fields get the token-chip editor, tag fields the tag row;
+    // everything else a plain row.
     const addRowFor = (k, v, isHidden) =>
-      isLinkKey(k) ? addLinkRow(linkLabel(k), v) : addFieldRow(k, v, isHidden);
+      isLinkKey(k) ? addLinkRow(linkLabel(k), v, isHidden)
+      : isTagKey(k) ? addTagRow(tagLabel(k), v, isHidden)
+      : addFieldRow(k, v, isHidden);
     // Render grouped fields under their group headers
     groups.forEach(g => {
       addGroupRow(g.name);
@@ -666,7 +727,7 @@ function openModal(scheme = null) {
     // Render ungrouped fields (not in any group, not hidden)
     entries.filter(([k]) => !groupedKeys.has(k)).forEach(([k, v]) => addRowFor(k, v, false));
     // Render hidden fields
-    hiddenEntries.forEach(([k, v]) => addFieldRow(k, v, true));
+    hiddenEntries.forEach(([k, v]) => addRowFor(k, v, true));
   }
 
   renderHiddenFieldsToggle(hiddenEntries.length);
@@ -759,7 +820,10 @@ copyFromBtn.addEventListener('click', () => {
   if (checkedFieldKeys.size === 0) { showToast('Check at least one field to copy'); return; }
 
   const groupedCheckedKeys = new Set();
-  const pasteField = (k, v) => isLinkKey(k) ? addLinkRow(linkLabel(k), v) : addFieldRow(k, v, false);
+  const pasteField = (k, v) =>
+    isLinkKey(k) ? addLinkRow(linkLabel(k), v)
+    : isTagKey(k) ? addTagRow(tagLabel(k), v)
+    : addFieldRow(k, v, false);
 
   // Add checked group headers with their fields
   sourceGroups.forEach(g => {
@@ -812,13 +876,30 @@ function getUniqueFieldKeys() {
   return Array.from(keys);
 }
 
+function getUniqueTagNames() {
+  const names = new Set();
+  schemes.forEach(s => {
+    const e = getEffective(s.id);
+    Object.keys(e.fields || {}).forEach(k => {
+      if (isTagKey(k)) names.add(tagLabel(k));
+    });
+  });
+  return Array.from(names);
+}
+
 function updateFieldSuggestions() {
-  const keys = getUniqueFieldKeys();
+  // Tag keys are offered by tagNameSuggestions instead — plain fields no
+  // longer suggest or create # keys.
+  const keys = getUniqueFieldKeys().filter(k => !isTagKey(k));
   const datalist = document.getElementById('fieldKeySuggestions');
   datalist.innerHTML = keys.map(k => `<option value="${esc(k)}">`).join('');
   const linkDatalist = document.getElementById('linkLabelSuggestions');
   if (linkDatalist) {
     linkDatalist.innerHTML = getUniqueLinkLabels().map(l => `<option value="${esc(l)}">`).join('');
+  }
+  const tagDatalist = document.getElementById('tagNameSuggestions');
+  if (tagDatalist) {
+    tagDatalist.innerHTML = getUniqueTagNames().map(t => `<option value="${esc(t)}">`).join('');
   }
 }
 
@@ -1024,11 +1105,12 @@ function initLinkEditor(row, initialValue) {
   sync();
 }
 
-function addLinkRow(label = '', value = '') {
+function addLinkRow(label = '', value = '', isHidden = false) {
   const idx = fieldRowIndex++;
   const row = document.createElement('div');
   row.className = 'dynamic-field-row link-row';
-  row.dataset.isHidden = 'false';
+  row.dataset.isHidden = isHidden ? 'true' : 'false';
+  if (isHidden) row.classList.add('field-hidden');
   row.innerHTML = `
     <span class="drag-handle" draggable="true">⠿</span>
     <input type="text" class="field-key-input" name="field_key_${idx}" placeholder="Link label (e.g. Feeds)" value="${esc(label ? '→ ' + label : '')}" list="linkLabelSuggestions" />
@@ -1040,6 +1122,37 @@ function addLinkRow(label = '', value = '') {
     <button class="remove-field" type="button" title="Hide field">&times;</button>
   `;
   initLinkEditor(row, value);
+  row.querySelector('.remove-field').addEventListener('click', () => {
+    if (row.dataset.isHidden === 'true') {
+      row.remove();
+      updateHiddenFieldsCount();
+    } else {
+      row.dataset.isHidden = 'true';
+      row.classList.add('field-hidden');
+      updateHiddenFieldsCount();
+    }
+  });
+  initDragHandle(row);
+  dynamicFields.appendChild(row);
+  updateHiddenFieldsCount();
+}
+
+// Tag rows look like plain field rows but carry the tag-row class: on save
+// the key gets the # marker and renders as a card badge. The name input
+// suggests tags already in use.
+function addTagRow(label = '', value = '', isHidden = false) {
+  const idx = fieldRowIndex++;
+  const row = document.createElement('div');
+  row.className = 'dynamic-field-row tag-row';
+  row.dataset.isHidden = isHidden ? 'true' : 'false';
+  if (isHidden) row.classList.add('field-hidden');
+  row.innerHTML = `
+    <span class="drag-handle" draggable="true">⠿</span>
+    <span class="row-type-icon" aria-hidden="true">🏷️</span>
+    <input type="text" class="field-key-input" name="field_key_${idx}" placeholder="Tag name" value="${esc(label)}" list="tagNameSuggestions" />
+    <input type="text" class="field-value-input" name="field_value_${idx}" placeholder="Value (optional)" value="${esc(value)}" />
+    <button class="remove-field" type="button" title="Hide field">&times;</button>
+  `;
   row.querySelector('.remove-field').addEventListener('click', () => {
     if (row.dataset.isHidden === 'true') {
       row.remove();
@@ -1081,6 +1194,7 @@ schemeModal.addEventListener('click', e => {
 addFieldBtn.addEventListener('click', () => addFieldRow('', ''));
 addGroupBtn.addEventListener('click', () => addGroupRow(''));
 addLinkBtn.addEventListener('click', () => addLinkRow('', ''));
+addTagBtn.addEventListener('click', () => addTagRow('', ''));
 
 showHiddenFieldsToggle.addEventListener('click', () => {
   showHiddenFields = !showHiddenFields;
@@ -1283,6 +1397,96 @@ searchInput.addEventListener('input', e => {
   searchTimer = setTimeout(() => render(), 100);
 });
 
+// ========== Expression Search ==========
+// Queries containing field:"Name" references or comparison operators are
+// compiled with filtrex (vendored at vendor/filtrex.js) and evaluated per
+// scheme; everything else stays a plain substring search. Supported syntax:
+// and/or/not, == != > >= < <=, ~= (regex), if/then/else, exists(), empty(),
+// arithmetic. Bare words resolve against field names case-insensitively and
+// `name` is the scheme name. Numeric-looking values compare as numbers.
+const EXPR_FIELD_RE = /field\s*:\s*(?:"([^"]*)"|'([^']*)')/gi;
+const EXPR_OPS_RE = /==|!=|>=|<=|~=|[A-Za-z0-9_)"']\s*[<>]\s*[0-9"']/;
+
+function preprocessExprQuery(q) {
+  return q.replace(EXPR_FIELD_RE, (m, dq, sq) => {
+    const name = (dq !== undefined ? dq : sq).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    return '__field("' + name + '")';
+  });
+}
+
+function coerceFieldValue(v) {
+  if (typeof v === 'string') {
+    const t = v.trim();
+    if (t !== '' && Number.isFinite(Number(t))) return Number(t);
+  }
+  return v;
+}
+
+function lookupExprField(fields, name) {
+  if (fields && Object.prototype.hasOwnProperty.call(fields, name)) {
+    return coerceFieldValue(fields[name]);
+  }
+  const lower = String(name).trim().toLowerCase();
+  for (const k of Object.keys(fields || {})) {
+    if (k.trim().toLowerCase() === lower) return coerceFieldValue(fields[k]);
+  }
+  return undefined;
+}
+
+// __field reads the scheme currently being tested; evaluation is synchronous,
+// so this slot is set right before each call.
+let exprCurrentFields = {};
+const exprCache = new Map();
+
+// Returns { fn } when the query compiles, { invalid: true } when it looks
+// like an expression but does not compile, or null for plain text queries.
+function compileSearchQuery(q) {
+  EXPR_FIELD_RE.lastIndex = 0;
+  if (!EXPR_FIELD_RE.test(q) && !EXPR_OPS_RE.test(q)) return null;
+  if (exprCache.has(q)) return exprCache.get(q);
+  if (exprCache.size > 100) exprCache.clear();
+  let result;
+  try {
+    result = {
+      fn: window.filtrex.compileExpression(preprocessExprQuery(q), {
+        extraFunctions: { __field: name => lookupExprField(exprCurrentFields, name) },
+        customProp: (name, get, obj) =>
+          obj && Object.prototype.hasOwnProperty.call(obj, name)
+            ? obj[name]
+            : lookupExprField(obj, name),
+        operators: { '~=': (a, b) => RegExp(String(b)).test(String(a)) }
+      })
+    };
+  } catch (err) {
+    result = { invalid: true };
+  }
+  exprCache.set(q, result);
+  return result;
+}
+
+function schemeMatchesQuery(e) {
+  const q = searchQuery.trim();
+  if (!q) return true;
+  const compiled = compileSearchQuery(q);
+  if (compiled) {
+    if (compiled.invalid) return false;
+    exprCurrentFields = e.fields || {};
+    // filtrex returns runtime errors as truthy Error objects; only a real
+    // boolean true counts as a match.
+    try {
+      return compiled.fn(Object.assign({}, e.fields, { name: e.name })) === true;
+    } catch (err) {
+      return false;
+    }
+  }
+  const lq = q.toLowerCase();
+  return (e.name || '').toLowerCase().includes(lq) ||
+    Object.entries(e.fields || {}).some(([k, v]) =>
+      k.toLowerCase().includes(lq) ||
+      String(v).toLowerCase().includes(lq)
+    );
+}
+
 // ========== Bulk Operations ==========
 bulkSelectAllBtn.addEventListener('click', () => {
   const visibleSchemes = schemes.filter(s => showHidden ? true : !s.hidden);
@@ -1341,6 +1545,22 @@ function addBulkLinkRow(label = '', value = '') {
   bulkDynamicFields.appendChild(row);
 }
 
+function addBulkTagRow(label = '', value = '') {
+  const idx = bulkFieldRowIndex++;
+  const row = document.createElement('div');
+  row.className = 'dynamic-field-row tag-row';
+  row.innerHTML = `
+    <span class="drag-handle" draggable="true">⠿</span>
+    <span class="row-type-icon" aria-hidden="true">🏷️</span>
+    <input type="text" class="field-key-input" name="bulk_field_key_${idx}" placeholder="Tag name" value="${esc(label)}" list="tagNameSuggestions" />
+    <input type="text" class="field-value-input" name="bulk_field_value_${idx}" placeholder="Value (optional)" value="${esc(value)}" />
+    <button class="remove-field" type="button">&times;</button>
+  `;
+  row.querySelector('.remove-field').addEventListener('click', () => row.remove());
+  initDragHandle(row);
+  bulkDynamicFields.appendChild(row);
+}
+
 let bulkGroupRowIndex = 0;
 
 function addBulkGroupRow(name = '') {
@@ -1359,7 +1579,7 @@ function addBulkGroupRow(name = '') {
 }
 
 function updateBulkFieldSuggestions() {
-  const keys = getUniqueFieldKeys();
+  const keys = getUniqueFieldKeys().filter(k => !isTagKey(k));
   const datalist = document.getElementById('bulkFieldKeySuggestions');
   datalist.innerHTML = keys.map(k => `<option value="${esc(k)}">`).join('');
 }
@@ -1399,6 +1619,7 @@ bulkModal.addEventListener('click', e => {
 bulkAddFieldBtn.addEventListener('click', () => addBulkFieldRow('', ''));
 bulkAddGroupBtn.addEventListener('click', () => addBulkGroupRow(''));
 bulkAddLinkBtn.addEventListener('click', () => addBulkLinkRow('', ''));
+bulkAddTagBtn.addEventListener('click', () => addBulkTagRow('', ''));
 
 bulkModalNext.addEventListener('click', () => {
   const { rows, groups } = parseFieldRows(bulkDynamicFields);

@@ -13,9 +13,9 @@
       <h1>💧 Water Supply Schemes</h1>
     </div>
     <div class="header-center">
-      <div class="search-wrapper">
+      <div class="search-wrapper" id="searchWrapper">
         <label for="searchInput" class="sr-only">Search schemes</label>
-        <input type="text" id="searchInput" placeholder="Search schemes..." />
+        <input type="text" id="searchInput" placeholder="Search schemes..." title='Logical search: field:"Demand(MLD)">400 and field:"No. of Villages"<2 — also supports == != >= <= ~= (regex), and/or/not, name' />
         <span class="search-icon">🔍</span>
       </div>
     </div>
@@ -86,11 +86,13 @@
           </div>
           <datalist id="fieldKeySuggestions"></datalist>
           <datalist id="linkLabelSuggestions"></datalist>
+          <datalist id="tagNameSuggestions"></datalist>
           <div id="dynamicFields"></div>
           <div class="field-add-row">
             <button class="btn btn-sm btn-outline" id="addFieldBtn">+ Add Field</button>
             <button class="btn btn-sm btn-outline" id="addGroupBtn">📁 Add Group</button>
             <button class="btn btn-sm btn-outline" id="addLinkBtn">🔗 Add Link</button>
+            <button class="btn btn-sm btn-outline" id="addTagBtn">🏷️ Add Tag</button>
           </div>
           <button class="btn btn-sm btn-outline hidden-fields-toggle hidden" id="showHiddenFieldsToggle"></button>
         </div>
@@ -289,6 +291,7 @@
               <button class="btn btn-sm btn-outline" id="bulkAddFieldBtn">+ Add Field</button>
               <button class="btn btn-sm btn-outline" id="bulkAddGroupBtn">📁 Add Group</button>
               <button class="btn btn-sm btn-outline" id="bulkAddLinkBtn">🔗 Add Link</button>
+              <button class="btn btn-sm btn-outline" id="bulkAddTagBtn">🏷️ Add Tag</button>
             </div>
           </div>
           <p class="bulk-hint">Typing an existing field name <strong>updates</strong> that field's values (you'll be asked to confirm). New names add new fields.</p>
@@ -312,6 +315,7 @@
     </div>
   </div>
 
+  <script src="vendor/filtrex.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
