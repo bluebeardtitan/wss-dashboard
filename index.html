@@ -85,10 +85,12 @@
             </div>
           </div>
           <datalist id="fieldKeySuggestions"></datalist>
+          <datalist id="linkLabelSuggestions"></datalist>
           <div id="dynamicFields"></div>
           <div class="field-add-row">
             <button class="btn btn-sm btn-outline" id="addFieldBtn">+ Add Field</button>
             <button class="btn btn-sm btn-outline" id="addGroupBtn">📁 Add Group</button>
+            <button class="btn btn-sm btn-outline" id="addLinkBtn">🔗 Add Link</button>
           </div>
           <button class="btn btn-sm btn-outline hidden-fields-toggle hidden" id="showHiddenFieldsToggle"></button>
         </div>
@@ -182,8 +184,9 @@
   <!-- Detail Modal -->
   <div id="detailModal" class="modal-overlay hidden">
     <div class="modal modal-detail">
-      <div class="modal-header">
-        <h2 id="detailModalTitle"></h2>
+      <div class="modal-header detail-modal-header">
+        <button class="detail-back hidden" id="detailBackBtn" type="button" title="Back to previous scheme" aria-label="Back to previous scheme">←</button>
+        <h2 id="detailModalTitle" tabindex="-1"></h2>
         <button class="modal-close" id="detailModalClose">&times;</button>
       </div>
       <div class="modal-body">
@@ -285,6 +288,7 @@
             <div class="field-add-row">
               <button class="btn btn-sm btn-outline" id="bulkAddFieldBtn">+ Add Field</button>
               <button class="btn btn-sm btn-outline" id="bulkAddGroupBtn">📁 Add Group</button>
+              <button class="btn btn-sm btn-outline" id="bulkAddLinkBtn">🔗 Add Link</button>
             </div>
           </div>
           <p class="bulk-hint">Typing an existing field name <strong>updates</strong> that field's values (you'll be asked to confirm). New names add new fields.</p>

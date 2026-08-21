@@ -149,8 +149,11 @@ function parseFieldRows(container) {
       if (currentGroup) groups.push(currentGroup);
       return;
     }
-    const k = row.querySelector('.field-key-input').value.trim();
+    let k = row.querySelector('.field-key-input').value.trim();
     if (!k) return;
+    // Link rows created via "Add Link" get the → marker applied on save,
+    // unless the user already typed a → or @ prefix themselves.
+    if (row.classList.contains('link-row') && !isLinkKey(k)) k = '→ ' + k;
     const valueInput = row.querySelector('.field-value-input');
     const entry = {
       key: k,
@@ -176,6 +179,7 @@ const schemeNameInput = document.getElementById('schemeNameInput');
 const dynamicFields = document.getElementById('dynamicFields');
 const addFieldBtn = document.getElementById('addFieldBtn');
 const addGroupBtn = document.getElementById('addGroupBtn');
+const addLinkBtn = document.getElementById('addLinkBtn');
 const modalSave = document.getElementById('modalSave');
 const modalCancel = document.getElementById('modalCancel');
 const modalClose = document.getElementById('modalClose');
@@ -229,6 +233,7 @@ const bulkModalClose = document.getElementById('bulkModalClose');
 const bulkDynamicFields = document.getElementById('bulkDynamicFields');
 const bulkAddFieldBtn = document.getElementById('bulkAddFieldBtn');
 const bulkAddGroupBtn = document.getElementById('bulkAddGroupBtn');
+const bulkAddLinkBtn = document.getElementById('bulkAddLinkBtn');
 const bulkModalCancel = document.getElementById('bulkModalCancel');
 const bulkModalSave = document.getElementById('bulkModalSave');
 const bulkModalNext = document.getElementById('bulkModalNext');
@@ -256,6 +261,7 @@ const discardBtn = document.getElementById('discardBtn');
 // Detail
 const detailModal = document.getElementById('detailModal');
 const detailModalTitle = document.getElementById('detailModalTitle');
+const detailBackBtn = document.getElementById('detailBackBtn');
 const detailModalBody = document.getElementById('detailModalBody');
 const detailModalClose = document.getElementById('detailModalClose');
 const detailModalCloseBtn = document.getElementById('detailModalCloseBtn');
@@ -403,7 +409,7 @@ function render() {
         if (gFields.length === 0) return;
         fieldsHtml += `<div class="card-group-header">${esc(g.name)}</div>`;
         gFields.slice(0, maxPreview - shown).forEach(k => {
-          fieldsHtml += `<div class="card-field"><span class="field-key">${esc(k)}</span><span class="field-value">${esc(e.fields[k])}</span></div>`;
+          fieldsHtml += `<div class="card-field"><span class="field-key">${esc(isLinkKey(k) ? linkLabel(k) : k)}</span><span class="field-value${isLinkKey(k) ? ' card-links' : ''}">${fieldValueCellHtml(k, e.fields[k])}</span></div>`;
           shown++;
         });
       });
@@ -411,7 +417,7 @@ function render() {
 
     const ungrouped = regularEntries.filter(([k]) => !groupedKeys.has(k));
     ungrouped.slice(0, maxPreview - shown).forEach(([k, v]) => {
-      fieldsHtml += `<div class="card-field"><span class="field-key">${esc(k)}</span><span class="field-value">${esc(v)}</span></div>`;
+      fieldsHtml += `<div class="card-field"><span class="field-key">${esc(isLinkKey(k) ? linkLabel(k) : k)}</span><span class="field-value${isLinkKey(k) ? ' card-links' : ''}">${fieldValueCellHtml(k, v)}</span></div>`;
       shown++;
     });
 
@@ -473,6 +479,17 @@ cardsContainer.addEventListener('click', e => {
   if (e.target.closest('.edit-btn')) { e.stopPropagation(); editScheme(schemeId); return; }
   if (e.target.closest('.dup-btn')) { e.stopPropagation(); duplicateScheme(schemeId); return; }
   if (e.target.closest('.hide-btn')) { e.stopPropagation(); toggleHideScheme(schemeId); return; }
+  const linkChip = e.target.closest('.link-chip');
+  if (linkChip) {
+    e.stopPropagation();
+    if (linkChip.dataset.target) {
+      const t = findSchemeByName(linkChip.dataset.target);
+      if (t) openDetailModal(t.id);
+    } else if (linkChip.dataset.missing) {
+      showToast(`No scheme named "${linkChip.dataset.missing}"`);
+    }
+    return;
+  }
   if (e.target.closest('.card-name-more')) {
     e.preventDefault();
     e.stopPropagation();
@@ -513,6 +530,72 @@ function esc(str) {
   const d = document.createElement('div');
   d.textContent = str;
   return d.innerHTML;
+}
+
+// ========== Scheme Links ==========
+// A link field is any field whose key starts with → (or @). Its value is a
+// comma-separated list of other schemes' names. Stored as plain text so
+// export/import, pivot, search and bulk edit keep treating it like any field.
+const LINK_KEY_RE = /^[→@]/;
+
+function isLinkKey(k) {
+  return LINK_KEY_RE.test(String(k));
+}
+
+function linkLabel(k) {
+  return String(k).replace(/^[→@]\s*/, '');
+}
+
+function parseLinkTargets(v) {
+  return String(v || '').split(',').map(s => s.trim()).filter(Boolean);
+}
+
+// esc() escapes <>& but not quotes; use this for attribute values.
+function escAttr(str) {
+  return esc(str).replace(/"/g, '&quot;');
+}
+
+function findSchemeByName(name) {
+  const n = String(name || '').trim().toLowerCase();
+  if (!n) return null;
+  return schemes.find(s => (getEffective(s.id).name || '').trim().toLowerCase() === n) || null;
+}
+
+// Schemes whose link fields name this scheme. Computed live so backlinks
+// survive without storage: they are just the reverse reading of the graph.
+function getBacklinks(id) {
+  const self = getEffective(id);
+  if (!self) return [];
+  const selfName = (self.name || '').trim().toLowerCase();
+  const out = [];
+  schemes.forEach(s => {
+    if (String(s.id) === String(id)) return;
+    const e = getEffective(s.id);
+    Object.entries(e.fields || {}).forEach(([k, v]) => {
+      if (!isLinkKey(k)) return;
+      if (parseLinkTargets(v).some(t => t.toLowerCase() === selfName)) {
+        out.push({ fromId: s.id, fromName: e.name, label: linkLabel(k) });
+      }
+    });
+  });
+  return out;
+}
+
+function linkChipHtml(name) {
+  const target = findSchemeByName(name);
+  if (target) {
+    return `<button type="button" class="link-chip" data-target="${escAttr(name)}"><span class="link-dot"></span>${esc(name)}</button>`;
+  }
+  return `<span class="link-chip link-chip-unresolved" data-missing="${escAttr(name)}" title="No scheme named “${escAttr(name)}”"><span class="link-dot"></span>${esc(name)}?</span>`;
+}
+
+function linkChipsHtml(value) {
+  return parseLinkTargets(value).map(linkChipHtml).join('');
+}
+
+// Value cell for card/detail rows: chips for link fields, escaped text otherwise.
+function fieldValueCellHtml(k, v) {
+  return isLinkKey(k) ? `<span class="card-links">${linkChipsHtml(v)}</span>` : esc(v);
 }
 
 // ========== CRUD (all staged) ==========
@@ -569,16 +652,19 @@ function openModal(scheme = null) {
   if (entries.length === 0 && hiddenEntries.length === 0 && groups.length === 0) {
     addFieldRow('', '');
   } else {
+    // Link fields get the token-chip editor; everything else a plain row.
+    const addRowFor = (k, v, isHidden) =>
+      isLinkKey(k) ? addLinkRow(linkLabel(k), v) : addFieldRow(k, v, isHidden);
     // Render grouped fields under their group headers
     groups.forEach(g => {
       addGroupRow(g.name);
       (g.fields || []).forEach(k => {
         const v = scheme.fields ? scheme.fields[k] : '';
-        if (v !== undefined) addFieldRow(k, v, false);
+        if (v !== undefined) addRowFor(k, v, false);
       });
     });
     // Render ungrouped fields (not in any group, not hidden)
-    entries.filter(([k]) => !groupedKeys.has(k)).forEach(([k, v]) => addFieldRow(k, v, false));
+    entries.filter(([k]) => !groupedKeys.has(k)).forEach(([k, v]) => addRowFor(k, v, false));
     // Render hidden fields
     hiddenEntries.forEach(([k, v]) => addFieldRow(k, v, true));
   }
@@ -673,6 +759,7 @@ copyFromBtn.addEventListener('click', () => {
   if (checkedFieldKeys.size === 0) { showToast('Check at least one field to copy'); return; }
 
   const groupedCheckedKeys = new Set();
+  const pasteField = (k, v) => isLinkKey(k) ? addLinkRow(linkLabel(k), v) : addFieldRow(k, v, false);
 
   // Add checked group headers with their fields
   sourceGroups.forEach(g => {
@@ -683,14 +770,14 @@ copyFromBtn.addEventListener('click', () => {
     addGroupRow(g.name);
     gFields.forEach(k => {
       groupedCheckedKeys.add(k);
-      if (sourceFields[k] !== undefined) addFieldRow(k, sourceFields[k], false);
+      if (sourceFields[k] !== undefined) pasteField(k, sourceFields[k]);
     });
   });
 
   // Add remaining checked fields not in any group
   checkedFieldKeys.forEach(k => {
     if (!groupedCheckedKeys.has(k) && sourceFields[k] !== undefined) {
-      addFieldRow(k, sourceFields[k], false);
+      pasteField(k, sourceFields[k]);
     }
   });
 
@@ -729,6 +816,10 @@ function updateFieldSuggestions() {
   const keys = getUniqueFieldKeys();
   const datalist = document.getElementById('fieldKeySuggestions');
   datalist.innerHTML = keys.map(k => `<option value="${esc(k)}">`).join('');
+  const linkDatalist = document.getElementById('linkLabelSuggestions');
+  if (linkDatalist) {
+    linkDatalist.innerHTML = getUniqueLinkLabels().map(l => `<option value="${esc(l)}">`).join('');
+  }
 }
 
 let fieldRowIndex = 0;
@@ -807,6 +898,160 @@ function updateHiddenFieldsCount() {
   if (editingId) renderHiddenFieldsToggle(hiddenCount);
 }
 
+// ---------- Link rows (token-chip editor) ----------
+function getUniqueLinkLabels() {
+  const labels = new Set();
+  schemes.forEach(s => {
+    const e = getEffective(s.id);
+    Object.keys(e.fields || {}).forEach(k => {
+      if (isLinkKey(k)) labels.add(linkLabel(k));
+    });
+  });
+  return Array.from(labels);
+}
+
+// Token-chip picker: selected schemes render as removable chips, the entry
+// input autocompletes over scheme names. The comma-joined selection is kept
+// in sync with a hidden .field-value-input so parseFieldRows reads it like
+// any other field.
+function initLinkEditor(row, initialValue) {
+  const editor = row.querySelector('.link-editor');
+  const chipsBox = editor.querySelector('.link-chips');
+  const entry = editor.querySelector('.link-entry');
+  const hidden = editor.querySelector('.field-value-input');
+  let items = parseLinkTargets(initialValue);
+  let activeIdx = -1;
+
+  const sug = document.createElement('div');
+  sug.className = 'link-suggest hidden';
+  editor.appendChild(sug);
+
+  const selfName = () => (schemeNameInput ? schemeNameInput.value : '').trim().toLowerCase();
+
+  function sync() { hidden.value = items.join(', '); }
+
+  function renderChips() {
+    chipsBox.innerHTML = items.map((n, i) =>
+      `<span class="link-chip link-chip-edit"><span class="link-dot"></span>${esc(n)}<button type="button" class="link-chip-x" data-i="${i}" aria-label="Remove ${escAttr(n)}">&times;</button></span>`
+    ).join('');
+  }
+
+  function candidates() {
+    const q = entry.value.trim().toLowerCase();
+    const chosen = new Set(items.map(x => x.toLowerCase()));
+    return schemes
+      .map(s => getEffective(s.id))
+      .filter(e => (e.name || '').trim().toLowerCase() !== selfName())
+      .map(e => e.name)
+      .filter(n => !chosen.has(n.toLowerCase()) && (!q || n.toLowerCase().includes(q)));
+  }
+
+  function renderSug() {
+    const c = candidates().slice(0, 8);
+    if (c.length === 0) { sug.classList.add('hidden'); activeIdx = -1; return; }
+    if (activeIdx >= c.length) activeIdx = c.length - 1;
+    if (activeIdx < 0) activeIdx = 0;
+    sug.innerHTML = c.map((n, i) =>
+      `<button type="button" class="link-sug${i === activeIdx ? ' link-sug-active' : ''}" data-name="${escAttr(n)}">${esc(n)}</button>`
+    ).join('');
+    sug.classList.remove('hidden');
+  }
+
+  function addItem(name) {
+    name = String(name || '').trim();
+    if (!name) return;
+    if (items.some(x => x.toLowerCase() === name.toLowerCase())) {
+      entry.value = '';
+      renderSug();
+      return;
+    }
+    items.push(name);
+    entry.value = '';
+    activeIdx = -1;
+    renderChips();
+    sync();
+    renderSug();
+  }
+
+  function removeAt(i) {
+    items.splice(i, 1);
+    renderChips();
+    sync();
+  }
+
+  entry.addEventListener('input', () => { activeIdx = -1; renderSug(); });
+  entry.addEventListener('focus', renderSug);
+  entry.addEventListener('keydown', e => {
+    const c = candidates().slice(0, 8);
+    if (e.key === 'ArrowDown' && c.length) {
+      e.preventDefault();
+      activeIdx = Math.min(activeIdx + 1, c.length - 1);
+      renderSug();
+    } else if (e.key === 'ArrowUp' && c.length) {
+      e.preventDefault();
+      activeIdx = Math.max(activeIdx - 1, 0);
+      renderSug();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      addItem(c[activeIdx] !== undefined ? c[activeIdx] : entry.value);
+    } else if (e.key === 'Backspace' && !entry.value && items.length) {
+      removeAt(items.length - 1);
+    } else if (e.key === 'Escape') {
+      sug.classList.add('hidden');
+    }
+  });
+  // Free-typed names are allowed too: they commit on blur and simply show
+  // as unresolved chips until a scheme with that name exists.
+  entry.addEventListener('blur', () => {
+    setTimeout(() => sug.classList.add('hidden'), 150);
+    if (entry.value.trim()) addItem(entry.value);
+  });
+  sug.addEventListener('mousedown', e => {
+    const b = e.target.closest('.link-sug');
+    if (!b) return;
+    e.preventDefault(); // keep focus in the entry; blur handler would re-add
+    addItem(b.dataset.name);
+  });
+  chipsBox.addEventListener('click', e => {
+    const x = e.target.closest('.link-chip-x');
+    if (x) removeAt(Number(x.dataset.i));
+  });
+
+  renderChips();
+  sync();
+}
+
+function addLinkRow(label = '', value = '') {
+  const idx = fieldRowIndex++;
+  const row = document.createElement('div');
+  row.className = 'dynamic-field-row link-row';
+  row.dataset.isHidden = 'false';
+  row.innerHTML = `
+    <span class="drag-handle" draggable="true">⠿</span>
+    <input type="text" class="field-key-input" name="field_key_${idx}" placeholder="Link label (e.g. Feeds)" value="${esc(label ? '→ ' + label : '')}" list="linkLabelSuggestions" />
+    <div class="link-editor">
+      <span class="link-chips"></span>
+      <input type="text" class="link-entry" placeholder="Add scheme…" autocomplete="off" />
+      <input type="hidden" class="field-value-input" value="${escAttr(value)}" />
+    </div>
+    <button class="remove-field" type="button" title="Hide field">&times;</button>
+  `;
+  initLinkEditor(row, value);
+  row.querySelector('.remove-field').addEventListener('click', () => {
+    if (row.dataset.isHidden === 'true') {
+      row.remove();
+      updateHiddenFieldsCount();
+    } else {
+      row.dataset.isHidden = 'true';
+      row.classList.add('field-hidden');
+      updateHiddenFieldsCount();
+    }
+  });
+  initDragHandle(row);
+  dynamicFields.appendChild(row);
+  updateHiddenFieldsCount();
+}
+
 function collectFieldData() {
   const name = schemeNameInput.value.trim();
   if (!name) {
@@ -832,6 +1077,7 @@ schemeModal.addEventListener('click', e => {
 
 addFieldBtn.addEventListener('click', () => addFieldRow('', ''));
 addGroupBtn.addEventListener('click', () => addGroupRow(''));
+addLinkBtn.addEventListener('click', () => addLinkRow('', ''));
 
 showHiddenFieldsToggle.addEventListener('click', () => {
   showHiddenFields = !showHiddenFields;
@@ -863,10 +1109,53 @@ schemeNameInput.addEventListener('keydown', e => {
 let detailSchemeId = null;
 let detailEntries = [];
 let detailGroups = [];
+let detailHistory = [];
+
+// The Connections block: outgoing link fields grouped by label on a rail,
+// plus "Referenced by" backlinks computed from every other scheme. Both
+// directions are clickable and navigate within the modal. Hidden while
+// filtering so matched link rows aren't rendered twice.
+function renderConnectionsHtml() {
+  const outGroups = [];
+  detailEntries.forEach(([k, v]) => {
+    if (!isLinkKey(k)) return;
+    const targets = parseLinkTargets(v);
+    if (targets.length) outGroups.push({ label: linkLabel(k), targets });
+  });
+  const backs = getBacklinks(detailSchemeId);
+
+  if (!outGroups.length && !backs.length) {
+    return `<div class="connections-block">
+      <div class="connections-title">Connections</div>
+      <p class="connections-none">No linked schemes yet — add one while editing.</p>
+    </div>`;
+  }
+
+  let html = `<div class="connections-block"><div class="connections-title">Connections</div>`;
+  outGroups.forEach(g => {
+    html += `<div class="conn-group conn-out">
+      <div class="conn-label"><span class="conn-arrow" aria-hidden="true">→</span>${esc(g.label)}</div>
+      <div class="conn-nodes">${g.targets.map(linkChipHtml).join('')}</div>
+    </div>`;
+  });
+  if (backs.length) {
+    html += `<div class="conn-group conn-in">
+      <div class="conn-label"><span class="conn-arrow" aria-hidden="true">←</span>Referenced by</div>
+      <div class="conn-nodes">${backs.map(b =>
+        `<button type="button" class="link-chip" data-target-id="${escAttr(String(b.fromId))}"><span class="link-dot"></span>${esc(b.fromName)}${b.label ? `<span class="conn-via"> · ${esc(b.label)}</span>` : ''}</button>`
+      ).join('')}</div>
+    </div>`;
+  }
+  html += `</div>`;
+  return html;
+}
 
 function renderDetailRows() {
   const query = detailSearchInput.value.toLowerCase();
   let rows = '';
+
+  const isLink = ([k]) => isLinkKey(k);
+  const keyText = k => esc(isLinkKey(k) ? linkLabel(k) : k);
 
   if (detailGroups.length > 0 && !query) {
     const groupedKeys = new Set(detailGroups.flatMap(g => g.fields || []));
@@ -877,22 +1166,22 @@ function renderDetailRows() {
       if (gFields.length === 0) return;
       rows += `<div class="detail-group-header">${esc(g.name)}</div>`;
       gFields.forEach(([k, [, v]]) => {
-        rows += `<div class="detail-row"><span class="detail-key">${esc(k)}</span><span class="detail-value">${esc(v)}</span></div>`;
+        rows += `<div class="detail-row"><span class="detail-key">${keyText(k)}</span><span class="detail-value${isLinkKey(k) ? ' card-links' : ''}">${fieldValueCellHtml(k, v)}</span></div>`;
       });
     });
-    const ungrouped = detailEntries.filter(([k]) => !groupedKeys.has(k));
+    const ungrouped = detailEntries.filter(([k]) => !groupedKeys.has(k) && !isLinkKey(k));
     if (ungrouped.length > 0) {
       ungrouped.forEach(([k, v]) => {
-        rows += `<div class="detail-row"><span class="detail-key">${esc(k)}</span><span class="detail-value">${esc(v)}</span></div>`;
+        rows += `<div class="detail-row"><span class="detail-key">${keyText(k)}</span><span class="detail-value">${esc(v)}</span></div>`;
       });
     }
   } else {
     const filtered = query
       ? detailEntries.filter(([k, v]) => k.toLowerCase().includes(query) || String(v).toLowerCase().includes(query))
-      : detailEntries;
+      : detailEntries.filter(([k]) => !isLinkKey(k));
     rows = filtered.length
       ? filtered.map(([k, v]) =>
-          `<div class="detail-row"><span class="detail-key">${esc(k)}</span><span class="detail-value">${esc(v)}</span></div>`
+          `<div class="detail-row"><span class="detail-key">${keyText(k)}</span><span class="detail-value${isLinkKey(k) ? ' card-links' : ''}">${fieldValueCellHtml(k, v)}</span></div>`
         ).join('')
       : '<p class="detail-empty">No matching fields</p>';
   }
@@ -900,30 +1189,72 @@ function renderDetailRows() {
   const totalVisible = query
     ? detailEntries.filter(([k, v]) => k.toLowerCase().includes(query) || String(v).toLowerCase().includes(query)).length
     : detailEntries.length;
-  detailModalBody.innerHTML = rows;
+
+  detailModalBody.innerHTML = (query ? '' : renderConnectionsHtml()) + rows;
   detailFieldCount.textContent = `${totalVisible} of ${detailEntries.length} field${detailEntries.length !== 1 ? 's' : ''}`;
 }
 
-function openDetailModal(id) {
+function openDetailModal(id, opts = {}) {
   const scheme = getEffective(id);
   if (!scheme) return;
+  if (!opts.navigate) detailHistory = [];
   detailSchemeId = id;
-  detailModalTitle.textContent = esc(scheme.name);
+  detailModalTitle.textContent = scheme.name;
   detailEntries = Object.entries(scheme.fields || {});
   detailGroups = scheme.groups || [];
   detailSearchInput.value = '';
   renderDetailRows();
+  detailBackBtn.classList.toggle('hidden', detailHistory.length === 0);
   detailModal.classList.remove('hidden');
-  setTimeout(() => detailSearchInput.focus(), 100);
+  detailModalBody.scrollTop = 0;
+  if (opts.refocusTitle) detailModalTitle.focus();
+}
+
+// Follow a link chip: remember where we came from so the back arrow can
+// retrace the path through the network.
+function gotoLinkedScheme(id) {
+  if (detailSchemeId === null || String(detailSchemeId) === String(id)) return;
+  detailHistory.push(detailSchemeId);
+  openDetailModal(id, { navigate: true, refocusTitle: true });
 }
 
 function closeDetailModal() {
   detailModal.classList.add('hidden');
   detailSchemeId = null;
   detailEntries = [];
+  detailHistory = [];
 }
 
 detailSearchInput.addEventListener('input', renderDetailRows);
+
+detailBackBtn.addEventListener('click', () => {
+  const prev = detailHistory.pop();
+  if (prev !== null && prev !== undefined) {
+    openDetailModal(prev, { navigate: true, refocusTitle: true });
+  } else {
+    detailBackBtn.classList.add('hidden');
+  }
+});
+
+// Chip navigation inside the detail body
+detailModalBody.addEventListener('click', e => {
+  const chip = e.target.closest('.link-chip');
+  if (!chip) return;
+  if (chip.dataset.targetId !== undefined) {
+    const t = findScheme(chip.dataset.targetId);
+    if (t) gotoLinkedScheme(t.id);
+    else showToast('That scheme no longer exists');
+    return;
+  }
+  if (chip.dataset.target) {
+    const t = findSchemeByName(chip.dataset.target);
+    if (t) gotoLinkedScheme(t.id);
+    return;
+  }
+  if (chip.dataset.missing) {
+    showToast(`No scheme named "${chip.dataset.missing}"`);
+  }
+});
 
 detailModalClose.addEventListener('click', closeDetailModal);
 detailModalCloseBtn.addEventListener('click', closeDetailModal);
@@ -976,6 +1307,26 @@ function addBulkFieldRow(key = '') {
     <input type="text" class="field-key-input" name="bulk_field_key_${idx}" placeholder="Field name" value="${esc(key)}" list="bulkFieldKeySuggestions" />
     <button class="remove-field" type="button">&times;</button>
   `;
+  row.querySelector('.remove-field').addEventListener('click', () => row.remove());
+  initDragHandle(row);
+  bulkDynamicFields.appendChild(row);
+}
+
+function addBulkLinkRow(label = '', value = '') {
+  const idx = bulkFieldRowIndex++;
+  const row = document.createElement('div');
+  row.className = 'dynamic-field-row link-row';
+  row.innerHTML = `
+    <span class="drag-handle" draggable="true">⠿</span>
+    <input type="text" class="field-key-input" name="bulk_field_key_${idx}" placeholder="Link label (e.g. Feeds)" value="${esc(label ? '→ ' + label : '')}" list="linkLabelSuggestions" />
+    <div class="link-editor">
+      <span class="link-chips"></span>
+      <input type="text" class="link-entry" placeholder="Add scheme…" autocomplete="off" />
+      <input type="hidden" class="field-value-input" value="${escAttr(value)}" />
+    </div>
+    <button class="remove-field" type="button">&times;</button>
+  `;
+  initLinkEditor(row, value);
   row.querySelector('.remove-field').addEventListener('click', () => row.remove());
   initDragHandle(row);
   bulkDynamicFields.appendChild(row);
@@ -1038,6 +1389,7 @@ bulkModal.addEventListener('click', e => {
 });
 bulkAddFieldBtn.addEventListener('click', () => addBulkFieldRow('', ''));
 bulkAddGroupBtn.addEventListener('click', () => addBulkGroupRow(''));
+bulkAddLinkBtn.addEventListener('click', () => addBulkLinkRow('', ''));
 
 bulkModalNext.addEventListener('click', () => {
   const { rows, groups } = parseFieldRows(bulkDynamicFields);
@@ -1171,7 +1523,48 @@ bulkModalSave.addEventListener('click', () => {
 });
 
 // ========== Commit / Discard ==========
+// When a scheme is renamed, every → link naming it would go stale. Rewrite
+// the old name in all other schemes' link fields (base records and any
+// staged changes) so references survive the rename.
+async function propagateRenames() {
+  for (const [id, changes] of pendingChanges) {
+    if (isNewId(id) || !changes.name) continue;
+    const base = findScheme(id);
+    if (!base || !base.name || base.name.trim() === changes.name.trim()) continue;
+    const oldName = base.name.trim().toLowerCase();
+    const newName = changes.name.trim();
+    if (!oldName) continue;
+
+    for (const s of schemes) {
+      if (String(s.id) === String(base.id)) continue;
+      const staged = pendingChanges.get(s.id);
+      const sourceFields = (staged && staged.fields) || (getEffective(s.id).fields || {});
+      const fields = { ...sourceFields };
+      let touched = false;
+      Object.keys(fields).forEach(k => {
+        if (!isLinkKey(k)) return;
+        const parts = parseLinkTargets(fields[k]);
+        const next = parts.map(p => (p.toLowerCase() === oldName ? newName : p));
+        if (next.some((p, i) => p !== parts[i])) {
+          fields[k] = next.join(', ');
+          touched = true;
+        }
+      });
+      if (!touched) continue;
+      if (staged && staged.fields) {
+        // Its own commit will persist the rewritten fields.
+        staged.fields = fields;
+      } else {
+        const target = findScheme(s.id);
+        target.fields = fields;
+        await dbUpdate({ ...target });
+      }
+    }
+  }
+}
+
 commitBtn.addEventListener('click', async () => {
+  await propagateRenames();
   const count = pendingChanges.size;
   let committed = 0;
   for (const [id, changes] of pendingChanges) {
