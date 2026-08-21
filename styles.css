@@ -1581,23 +1581,7 @@ tr.bulk-row-active td:not(.bulk-grid-scheme-col) {
   justify-content: flex-end;
 }
 
-/* ========== Duplicate Button ========== */
-.card-actions .dup-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 1rem;
-  padding: 4px;
-  border-radius: 4px;
-  transition: background var(--transition);
-  opacity: 0.6;
-}
-
-.card-actions .dup-btn:hover {
-  background: var(--surface-hover);
-  opacity: 1;
-}
-
+/* ========== Detail Modal ========== */
 .detail-search-wrapper {
   position: relative;
   display: flex;

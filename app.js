@@ -237,6 +237,7 @@ const bulkSelectedCount = document.getElementById('bulkSelectedCount');
 const bulkSelectAllBtn = document.getElementById('bulkSelectAllBtn');
 const bulkDeselectAllBtn = document.getElementById('bulkDeselectAllBtn');
 const bulkFieldsBtn = document.getElementById('bulkFieldsBtn');
+const bulkDuplicateBtn = document.getElementById('bulkDuplicateBtn');
 const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
 const bulkModal = document.getElementById('bulkModal');
 const bulkModalTitle = document.getElementById('bulkModalTitle');
@@ -369,7 +370,7 @@ function render() {
   const newPending = [...pendingChanges.keys()].filter(isNewId).length;
   const totalPending = pendingCount + newPending;
 
-  statsBar.textContent = `${filtered.length} of ${visibleSchemes.length} scheme${visibleSchemes.length !== 1 ? 's' : ''}${showHidden && hiddenCount ? ` (${hiddenCount} hidden)` : ''}${totalPending ? ` — ${totalPending} unsaved` : ''}${searchInvalid ? ' — invalid expression' : ''}`;
+  statsBar.textContent = `${filtered.length} of ${visibleSchemes.length} card${visibleSchemes.length !== 1 ? 's' : ''}${showHidden && hiddenCount ? ` (${hiddenCount} hidden)` : ''}${totalPending ? ` — ${totalPending} unsaved` : ''}${searchInvalid ? ' — invalid expression' : ''}`;
 
   updatePendingBar();
 
@@ -377,10 +378,10 @@ function render() {
     cardsContainer.innerHTML = '';
     emptyState.style.display = 'flex';
     emptyState.querySelector('h2').textContent = visibleSchemes.length === 0
-      ? 'No schemes yet'
-      : 'No matching schemes';
+      ? 'No cards yet'
+      : 'No matching cards';
     emptyState.querySelector('p').textContent = visibleSchemes.length === 0
-      ? 'Click "Add Scheme" to create your first water supply scheme entry.'
+      ? 'Click "Add Card" to create your first card.'
       : 'Try a different search term.';
     return;
   }
@@ -457,8 +458,6 @@ function render() {
           ${nameHtml}${hiddenBadge}${pendingBadge}
           <div class="card-actions">
             <button class="edit-btn" title="Edit">✏️</button>
-            <button class="dup-btn" title="Duplicate scheme">📋</button>
-            <button class="hide-btn" title="${e.hidden ? 'Unhide' : 'Hide'}">${e.hidden ? '👁️' : '🙈'}</button>
           </div>
         </div>
         ${tagsHtml}
@@ -485,8 +484,6 @@ cardsContainer.addEventListener('click', e => {
   if (schemeId === null) return;
 
   if (e.target.closest('.edit-btn')) { e.stopPropagation(); editScheme(schemeId); return; }
-  if (e.target.closest('.dup-btn')) { e.stopPropagation(); duplicateScheme(schemeId); return; }
-  if (e.target.closest('.hide-btn')) { e.stopPropagation(); toggleHideScheme(schemeId); return; }
   const linkChip = e.target.closest('.link-chip');
   if (linkChip) {
     e.stopPropagation();
@@ -494,7 +491,7 @@ cardsContainer.addEventListener('click', e => {
       const t = findSchemeByName(linkChip.dataset.target);
       if (t) openDetailModal(t.id);
     } else if (linkChip.dataset.missing) {
-      showToast(`No scheme named "${linkChip.dataset.missing}"`);
+      showToast(`No card named "${linkChip.dataset.missing}"`);
     }
     return;
   }
@@ -644,7 +641,7 @@ function linkChipHtml(name) {
   if (target) {
     return `<button type="button" class="link-chip" data-target="${escAttr(name)}"><span class="link-dot"></span>${esc(name)}</button>`;
   }
-  return `<span class="link-chip link-chip-unresolved" data-missing="${escAttr(name)}" title="No scheme named “${escAttr(name)}”"><span class="link-dot"></span>${esc(name)}?</span>`;
+  return `<span class="link-chip link-chip-unresolved" data-missing="${escAttr(name)}" title="No card named “${escAttr(name)}”"><span class="link-dot"></span>${esc(name)}?</span>`;
 }
 
 function linkChipsHtml(value) {
@@ -667,6 +664,8 @@ function editScheme(id) {
   if (scheme) openModal(scheme);
 }
 
+// Stages a pending clone with a "(copy)" suffix. Silent — callers own the
+// toast, so multi-selection can summarize one operation in one message.
 function duplicateScheme(id) {
   const source = getEffective(id);
   if (!source) return;
@@ -676,14 +675,6 @@ function duplicateScheme(id) {
     { ...(source.hiddenFields || {}) },
     JSON.parse(JSON.stringify(source.groups || []))
   );
-  showToast('Scheme duplicated — edit and commit');
-}
-
-function toggleHideScheme(id) {
-  const current = getEffective(id);
-  if (!current) return;
-  stageChange(id, { hidden: !current.hidden });
-  showToast(current.hidden ? 'Scheme unhidden (pending)' : 'Scheme hidden (pending)');
 }
 
 showHiddenBtn.addEventListener('click', () => {
@@ -696,7 +687,7 @@ let showHiddenFields = false;
 
 function openModal(scheme = null) {
   editingId = scheme ? scheme.id : null;
-  modalTitle.textContent = scheme ? 'Edit Scheme' : 'Add Scheme';
+  modalTitle.textContent = scheme ? 'Edit Card' : 'Add Card';
   schemeNameInput.value = scheme ? scheme.name : '';
   updateFieldSuggestions();
   dynamicFields.innerHTML = '';
@@ -733,7 +724,7 @@ function openModal(scheme = null) {
   renderHiddenFieldsToggle(hiddenEntries.length);
 
   // Populate copy-from dropdown (exclude current scheme)
-  copyFromSelect.innerHTML = '<option value="">— Select a scheme —</option>';
+  copyFromSelect.innerHTML = '<option value="">— Select a card —</option>';
   schemes.filter(s => s.id !== editingId).forEach(s => {
     const e = getEffective(s.id);
     copyFromSelect.innerHTML += `<option value="${s.id}">${esc(e.name)}</option>`;
@@ -805,7 +796,7 @@ copyFromSelect.addEventListener('change', () => {
 
 copyFromBtn.addEventListener('click', () => {
   const sourceId = copyFromSelect.value;
-  if (!sourceId) { showToast('Select a scheme first'); return; }
+  if (!sourceId) { showToast('Select a card first'); return; }
   const source = getEffective(sourceId);
   if (!source) return;
 
@@ -1171,7 +1162,7 @@ function addTagRow(label = '', value = '', isHidden = false) {
 function collectFieldData() {
   const name = schemeNameInput.value.trim();
   if (!name) {
-    alert('Scheme name is required');
+    alert('Card name is required');
     return null;
   }
   const { rows, groups } = parseFieldRows(dynamicFields);
@@ -1213,7 +1204,7 @@ modalSave.addEventListener('click', () => {
     showToast('Changes staged');
   } else {
     stageNewScheme(data.name, data.fields, data.hiddenFields, data.groups);
-    showToast('New scheme staged');
+    showToast('New card staged');
   }
   closeModal();
 });
@@ -1255,7 +1246,7 @@ function renderConnectionsHtml(query) {
     if (q) return '';
     return `<div class="connections-block">
       <div class="connections-title">Connections</div>
-      <p class="connections-none">No linked schemes yet — add one while editing.</p>
+      <p class="connections-none">No linked cards yet — add one while editing.</p>
     </div>`;
   }
 
@@ -1369,7 +1360,7 @@ detailModalBody.addEventListener('click', e => {
   if (chip.dataset.targetId !== undefined) {
     const t = findScheme(chip.dataset.targetId);
     if (t) gotoLinkedScheme(t.id);
-    else showToast('That scheme no longer exists');
+    else showToast('That card no longer exists');
     return;
   }
   if (chip.dataset.target) {
@@ -1378,7 +1369,7 @@ detailModalBody.addEventListener('click', e => {
     return;
   }
   if (chip.dataset.missing) {
-    showToast(`No scheme named "${chip.dataset.missing}"`);
+      showToast(`No card named "${chip.dataset.missing}"`);
   }
 });
 
@@ -1489,7 +1480,10 @@ function schemeMatchesQuery(e) {
 
 // ========== Bulk Operations ==========
 bulkSelectAllBtn.addEventListener('click', () => {
-  const visibleSchemes = schemes.filter(s => showHidden ? true : !s.hidden);
+  // Respect the active search: only cards currently matching are selected.
+  const visibleSchemes = schemes
+    .filter(s => showHidden ? true : !s.hidden)
+    .filter(s => schemeMatchesQuery(getEffective(s.id)));
   visibleSchemes.forEach(s => selectedIds.add(s.id));
   updateBulkBar();
   render();
@@ -1500,12 +1494,23 @@ bulkDeselectAllBtn.addEventListener('click', () => {
 });
 
 bulkDeleteBtn.addEventListener('click', () => {
-  if (!confirm(`Hide ${selectedIds.size} scheme(s)?`)) return;
+  if (!confirm(`Hide ${selectedIds.size} card(s)?`)) return;
   for (const id of selectedIds) {
     stageChange(id, { hidden: true });
   }
   exitSelectionMode();
-  showToast('Schemes hidden (pending)');
+  showToast('Cards hidden (pending)');
+});
+
+// Hide and duplicate live only here now — selection mode is the single
+// surface for both, even when just one card is selected.
+bulkDuplicateBtn.addEventListener('click', () => {
+  const count = selectedIds.size;
+  for (const id of selectedIds) {
+    duplicateScheme(id);
+  }
+  exitSelectionMode();
+  showToast(`${count} card${count !== 1 ? 's' : ''} duplicated (pending)`);
 });
 
 // ========== Bulk Fields Modal ==========
@@ -1586,7 +1591,7 @@ function updateBulkFieldSuggestions() {
 
 function openBulkModal() {
   bulkModalTitle.textContent = 'Add/Edit Fields';
-  bulkModalDesc.textContent = `Apply fields to ${selectedIds.size} selected scheme(s). Existing fields with the same name will be overwritten.`;
+  bulkModalDesc.textContent = `Apply fields to ${selectedIds.size} selected card(s). Existing fields with the same name will be overwritten.`;
   bulkDynamicFields.innerHTML = '';
   bulkFieldRowIndex = 0;
   bulkGroupRowIndex = 0;
@@ -1653,7 +1658,7 @@ bulkModalNext.addEventListener('click', () => {
 
   const schemeIds = [...selectedIds];
   bulkStep2Title.textContent = 'Enter values per scheme';
-  bulkStep2Desc.innerHTML = `${schemeIds.length} scheme${schemeIds.length === 1 ? '' : 's'} in this batch. Leave a cell blank for null. <strong>Tab</strong> / <strong>arrow keys</strong> to navigate.`;
+  bulkStep2Desc.innerHTML = `${schemeIds.length} card${schemeIds.length === 1 ? '' : 's'} in this batch. Leave a cell blank for null. <strong>Tab</strong> / <strong>arrow keys</strong> to navigate.`;
 
   let gridHtml = '<table class="bulk-grid-table"><thead><tr><th class="bulk-grid-scheme-col">Scheme</th>';
   fieldKeys.forEach(k => gridHtml += `<th>${esc(k)}</th>`);
@@ -1749,7 +1754,7 @@ bulkModalSave.addEventListener('click', () => {
 
   exitSelectionMode();
   closeBulkModal();
-  showToast(`Fields staged for ${selectedIds.size} scheme(s)`);
+  showToast(`Fields staged for ${selectedIds.size} card(s)`);
 });
 
 // ========== Commit / Discard ==========
@@ -1850,7 +1855,7 @@ function getFieldKeys() {
     const e = getEffective(s.id);
     Object.keys(e.fields || {}).forEach(k => keys.add(k));
   });
-  return ['Scheme Name', ...Array.from(keys)];
+  return ['Card Name', ...Array.from(keys)];
 }
 
 function renderCheckList(container, keys, checkedKeys = []) {
@@ -1868,7 +1873,7 @@ function getCheckedValues(container) {
 
 function openPivotModal() {
   const keys = getFieldKeys();
-  renderCheckList(pivotRows, keys, ['Scheme Name']);
+  renderCheckList(pivotRows, keys, ['Card Name']);
   renderCheckList(pivotCols, keys, []);
   pivotValues.innerHTML = keys.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join('');
   pivotResult.innerHTML = '';
@@ -1893,7 +1898,7 @@ pivotModal.addEventListener('click', e => {
 });
 
 function getFieldValue(scheme, fieldKey) {
-  if (fieldKey === 'Scheme Name') return scheme.name;
+  if (fieldKey === 'Card Name') return scheme.name;
   return scheme.fields ? scheme.fields[fieldKey] : undefined;
 }
 
@@ -2084,7 +2089,7 @@ exportCsvBtn.addEventListener('click', () => {
 
   const csv = rows.map(r => r.join(',')).join('\n');
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
-  downloadBlob(blob, 'pivot-table.csv');
+  downloadBlob(blob, 'table.csv');
   showPivotToast('✓ CSV downloaded');
 });
 
@@ -2140,7 +2145,7 @@ function importJSON(file) {
         await dbAdd(normalizeScheme(s));
       }
       await loadSchemes();
-      showToast(`Imported ${data.length} scheme${data.length !== 1 ? 's' : ''}`);
+      showToast(`Imported ${data.length} card${data.length !== 1 ? 's' : ''}`);
     } catch (err) {
       alert('Failed to parse JSON file: ' + err.message);
     }
@@ -2390,7 +2395,7 @@ dataDrivePull.addEventListener('click', async () => {
       await dbAdd(normalizeScheme(s));
     }
     await loadSchemes();
-    showToast(`Synced ${data.length} scheme${data.length !== 1 ? 's' : ''} from Drive`);
+    showToast(`Synced ${data.length} card${data.length !== 1 ? 's' : ''} from Drive`);
   } catch (err) {
     console.error(err);
     showToast('Sync failed: ' + err.message);
@@ -2503,8 +2508,8 @@ function makeJumpBtn(dir, scrollEl, contextLabel) {
   const modalEl = overlay && overlay.querySelector('.modal');
   if (!modalEl) return;
   initScrollGlow(modalEl);
-  overlay.appendChild(makeJumpBtn('top', modalEl, id === 'schemeModal' ? 'form' : id === 'pivotModal' ? 'pivot table' : id === 'detailModal' ? 'details' : id === 'dataMenuModal' ? 'data menu' : 'bulk editor'));
-  overlay.appendChild(makeJumpBtn('bottom', modalEl, id === 'schemeModal' ? 'form' : id === 'pivotModal' ? 'pivot table' : id === 'detailModal' ? 'details' : id === 'dataMenuModal' ? 'data menu' : 'bulk editor'));
+  overlay.appendChild(makeJumpBtn('top', modalEl, id === 'schemeModal' ? 'form' : id === 'pivotModal' ? 'table' : id === 'detailModal' ? 'details' : id === 'dataMenuModal' ? 'data menu' : 'bulk editor'));
+  overlay.appendChild(makeJumpBtn('bottom', modalEl, id === 'schemeModal' ? 'form' : id === 'pivotModal' ? 'table' : id === 'detailModal' ? 'details' : id === 'dataMenuModal' ? 'data menu' : 'bulk editor'));
 });
 
 // Page-level jump buttons

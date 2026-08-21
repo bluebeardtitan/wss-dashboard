@@ -14,15 +14,15 @@
     </div>
     <div class="header-center">
       <div class="search-wrapper" id="searchWrapper">
-        <label for="searchInput" class="sr-only">Search schemes</label>
-        <input type="text" id="searchInput" placeholder="Search schemes..." title='Logical search: field:"Demand(MLD)">400 and field:"No. of Villages"<2 — also supports == != >= <= ~= (regex), and/or/not, name' />
+        <label for="searchInput" class="sr-only">Search cards</label>
+        <input type="text" id="searchInput" placeholder="Search cards..." title='Logical search: field:"Demand(MLD)">400 and field:"No. of Villages"<2 — also supports == != >= <= ~= (regex), and/or/not, name' />
         <span class="search-icon">🔍</span>
       </div>
     </div>
     <div class="header-right">
       <button class="btn btn-secondary" id="dataMenuBtn">📁 Data</button>
-      <button class="btn btn-secondary" id="pivotBtn">📊 Pivot Table</button>
-      <button class="btn btn-primary" id="addSchemeBtn">+ Add Scheme</button>
+      <button class="btn btn-secondary" id="pivotBtn">📊 Table</button>
+      <button class="btn btn-primary" id="addSchemeBtn">+ Add Card</button>
       <button class="theme-toggle" id="themeToggle" title="Toggle theme">🌙</button>
     </div>
   </header>
@@ -40,13 +40,14 @@
       <button class="btn btn-sm btn-outline" id="bulkSelectAllBtn">Select All</button>
       <button class="btn btn-sm btn-outline" id="bulkDeselectAllBtn">Deselect All</button>
       <button class="btn btn-sm btn-primary" id="bulkFieldsBtn">+ Add/Edit Fields</button>
+      <button class="btn btn-sm btn-outline" id="bulkDuplicateBtn">📋 Duplicate</button>
       <button class="btn btn-sm btn-danger" id="bulkDeleteBtn">🙈 Hide</button>
     </div>
     <div id="cardsContainer" class="cards-grid"></div>
     <div id="emptyState" class="empty-state">
       <div class="empty-icon">🏗️</div>
-      <h2>No schemes yet</h2>
-      <p>Click "Add Scheme" to create your first water supply scheme entry.</p>
+      <h2>No cards yet</h2>
+      <p>Click "Add Card" to create your first card.</p>
     </div>
   </main>
 
@@ -54,13 +55,13 @@
   <div id="schemeModal" class="modal-overlay hidden">
     <div class="modal">
       <div class="modal-header">
-        <h2 id="modalTitle">Add Scheme</h2>
+        <h2 id="modalTitle">Add Card</h2>
         <button class="modal-close" id="modalClose">&times;</button>
       </div>
       <div class="modal-body">
         <div class="field-group">
-          <label for="schemeNameInput">Scheme Name <span class="required">*</span></label>
-          <input type="text" id="schemeNameInput" name="schemeName" placeholder="Enter scheme name" />
+          <label for="schemeNameInput">Card Name <span class="required">*</span></label>
+          <input type="text" id="schemeNameInput" name="schemeName" placeholder="Enter card name" />
         </div>
         <div class="field-group">
           <div class="field-label">Custom Fields</div>
@@ -68,7 +69,7 @@
             <div class="copy-from-header">
               <label for="copyFromSelect">Copy from:</label>
               <select id="copyFromSelect">
-                <option value="">— Select a scheme —</option>
+                <option value="">— Select a card —</option>
               </select>
             </div>
             <div class="copy-from-picklist hidden" id="copyFromPicklist">
@@ -108,7 +109,7 @@
   <div id="pivotModal" class="modal-overlay hidden">
     <div class="modal modal-lg">
       <div class="modal-header">
-        <h2>📊 Pivot Table</h2>
+        <h2>📊 Table</h2>
         <button class="modal-close" id="pivotModalClose">&times;</button>
       </div>
       <div class="modal-body">
@@ -162,12 +163,12 @@
             </div>
             <select id="pivotFormat" name="pivotFormat">
               <option value="wide">Wide (cross-tab)</option>
-              <option value="long">Long (flat list)</option>
+              <option value="long" selected>Long (flat list)</option>
             </select>
           </div>
         </div>
         <button class="btn btn-primary btn-pivot" id="generatePivotBtn">
-          <span>▶</span> Generate Pivot Table
+          <span>▶</span> Generate Table
         </button>
         <div id="pivotResult" class="pivot-result"></div>
         <div class="pivot-export-bar hidden" id="pivotExportBar">
@@ -225,8 +226,8 @@
           <button class="data-menu-item" id="showHiddenBtn">
             <span class="data-menu-icon">👁️</span>
             <div>
-              <div class="data-menu-label">Show hidden schemes <span class="data-menu-count" id="showHiddenCount">0</span></div>
-              <div class="data-menu-desc">Include hidden schemes in the dashboard</div>
+              <div class="data-menu-label">Show hidden cards <span class="data-menu-count" id="showHiddenCount">0</span></div>
+              <div class="data-menu-desc">Include hidden cards in the dashboard</div>
             </div>
           </button>
           <hr class="data-menu-divider" />
