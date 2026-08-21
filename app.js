@@ -214,6 +214,8 @@ const exportCsvBtn = document.getElementById('exportCsvBtn');
 const copyTableBtn = document.getElementById('copyTableBtn');
 const pivotExportBar = document.getElementById('pivotExportBar');
 const pivotToast = document.getElementById('pivotToast');
+const tablePreviewSummary = document.getElementById('tablePreviewSummary');
+const tablePreviewBody = document.getElementById('tablePreviewBody');
 
 // Data Menu
 const dataMenuBtn = document.getElementById('dataMenuBtn');
@@ -1878,6 +1880,7 @@ function openPivotModal() {
   pivotValues.innerHTML = keys.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join('');
   pivotResult.innerHTML = '';
   pivotExportBar.classList.add('hidden');
+  updateTablePreview();
   pivotModal.classList.remove('hidden');
 }
 
@@ -1895,6 +1898,8 @@ pivotModal.addEventListener('click', e => {
   if (!container) return;
   const check = btn.classList.contains('check-all-btn');
   container.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = check);
+  // Programmatic checks don't fire change events — refresh the preview here.
+  scheduleTablePreview();
 });
 
 function getFieldValue(scheme, fieldKey) {
@@ -1932,7 +1937,10 @@ function aggregateRecords(records, agg) {
   return { pivotMap, sumMap, countMap };
 }
 
-generatePivotBtn.addEventListener('click', () => {
+// Shared table builder: returns { html, shown, total } or null when no
+// row/column field is selected. maxRows caps rendered rows so the live
+// preview stays compact; Generate passes Infinity for the full table.
+function buildTableParts(maxRows) {
   const rowKeys = getCheckedValues(pivotRows);
   const colKeys = getCheckedValues(pivotCols);
   const valKey = pivotValues.value;
@@ -1940,10 +1948,7 @@ generatePivotBtn.addEventListener('click', () => {
   const format = pivotFormat.value;
   const isComma = agg === 'comma' || agg === 'comma-distinct';
 
-  if (!rowKeys.length && !colKeys.length) {
-    alert('Select at least one row or column field.');
-    return;
-  }
+  if (!rowKeys.length && !colKeys.length) return null;
 
   const filtered = schemes.filter(s => {
     const e = getEffective(s.id);
@@ -2004,17 +2009,18 @@ generatePivotBtn.addEventListener('click', () => {
     colKeys.forEach(k => html += `<th>${esc(k)}</th>`);
     html += '</tr></thead><tbody>';
 
-    records.forEach(r => {
+    let shown = 0;
+    for (const r of records) {
+      if (shown >= maxRows) break;
       html += '<tr>';
       r.rowParts.forEach(p => html += `<td>${esc(p)}</td>`);
       r.colParts.forEach(p => html += `<td>${esc(p)}</td>`);
       html += '</tr>';
-    });
+      shown++;
+    }
 
     html += '</tbody></table>';
-    pivotResult.innerHTML = filtered.length === 0 ? '<p>No data to display.</p>' : html;
-    pivotExportBar.classList.toggle('hidden', filtered.length === 0);
-    return;
+    return { html, shown, total: records.length };
   }
 
   // ========== Wide format (cross-tab) ==========
@@ -2030,8 +2036,8 @@ generatePivotBtn.addEventListener('click', () => {
   });
   html += '</tr></thead><tbody>';
 
-  rowLabels.forEach(r => {
-    if (r === totalLabel) return;
+  const shownRowLabels = rowLabels.filter(r => r !== totalLabel).slice(0, maxRows);
+  shownRowLabels.forEach(r => {
     html += `<tr><td><strong>${esc(displayParts(r.split('|')))}</strong></td>`;
     let rowTotal = 0;
     colLabels.forEach(c => {
@@ -2044,19 +2050,17 @@ generatePivotBtn.addEventListener('click', () => {
   });
 
   // Totals row
-  if (rowLabels.filter(r => r !== totalLabel).length > 1 && showTotals) {
+  if (shownRowLabels.length > 1 && showTotals) {
     html += '<tr><td><strong>Total</strong></td>';
     colLabels.forEach(c => {
       let colTotal = 0;
-      rowLabels.forEach(r => {
-        if (r === totalLabel) return;
+      shownRowLabels.forEach(r => {
         colTotal += Number(cellVal(r, c));
       });
       html += `<td>${colTotal}</td>`;
     });
     let grandTotal = 0;
-    rowLabels.forEach(r => {
-      if (r === totalLabel) return;
+    shownRowLabels.forEach(r => {
       colLabels.forEach(c => {
         grandTotal += Number(cellVal(r, c));
       });
@@ -2065,9 +2069,61 @@ generatePivotBtn.addEventListener('click', () => {
   }
 
   html += '</tbody></table>';
+  return { html, shown: shownRowLabels.length, total: records.length };
+}
 
-  pivotResult.innerHTML = filtered.length === 0 ? '<p>No data to display.</p>' : html;
-  pivotExportBar.classList.toggle('hidden', filtered.length === 0);
+generatePivotBtn.addEventListener('click', () => {
+  const built = buildTableParts(Infinity);
+  if (!built) {
+    alert('Select at least one row or column field.');
+    return;
+  }
+  pivotResult.innerHTML = built.total === 0 ? '<p>No data to display.</p>' : built.html;
+  pivotExportBar.classList.toggle('hidden', built.total === 0);
+});
+
+// ---------- Live preview ----------
+// A compact version of the real table, rebuilt from actual data on every
+// selection change, so the shape of the report is visible before generating.
+const AGG_VERBS = { count: 'count', sum: 'sum', avg: 'average', comma: 'list', 'comma-distinct': 'unique list' };
+const PREVIEW_MAX_ROWS = 8;
+
+function updateTablePreview() {
+  const rowKeys = getCheckedValues(pivotRows);
+  const colKeys = getCheckedValues(pivotCols);
+  const dims = [];
+  if (rowKeys.length) dims.push(rowKeys.join(' + '));
+  if (colKeys.length) dims.push(colKeys.join(' + '));
+  tablePreviewSummary.textContent = dims.length
+    ? `${AGG_VERBS[pivotAgg.value] || pivotAgg.value} of ${pivotValues.value} by ${dims.join(' × ')}`
+    : '';
+
+  const built = buildTableParts(PREVIEW_MAX_ROWS);
+  if (!built) {
+    tablePreviewBody.innerHTML = '<p class="table-preview-empty">Select at least one row or column field to see the table.</p>';
+    return;
+  }
+  if (built.total === 0) {
+    tablePreviewBody.innerHTML = '<p class="table-preview-empty">No cards match the current search.</p>';
+    return;
+  }
+  const note = built.shown < built.total
+    ? `<p class="table-preview-note">Showing ${built.shown} of ${built.total} rows — generate for the full table.</p>`
+    : '';
+  tablePreviewBody.innerHTML = built.html + note;
+}
+
+let previewTimer = null;
+function scheduleTablePreview() {
+  // Selections changed: a previously generated result is now stale.
+  pivotResult.innerHTML = '';
+  pivotExportBar.classList.add('hidden');
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(updateTablePreview, 120);
+}
+
+pivotModal.addEventListener('change', e => {
+  if (e.target.closest('.pivot-controls')) scheduleTablePreview();
 });
 
 exportCsvBtn.addEventListener('click', () => {

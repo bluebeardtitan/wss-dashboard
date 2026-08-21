@@ -945,6 +945,57 @@ tr.bulk-row-active td:not(.bulk-grid-scheme-col) {
 }
 
 /* ========== Pivot Table ========== */
+/* Live preview: compact draft of the table, rebuilt on every selection
+   change. Dashed border marks it as provisional vs the generated result. */
+.table-preview {
+  margin-top: 16px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.table-preview-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px dashed var(--border);
+}
+
+.table-preview-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.table-preview-summary {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  min-height: 1em;
+}
+
+.table-preview-body {
+  max-height: 260px;
+  overflow: auto;
+  padding: 10px 12px;
+}
+
+.table-preview-body .pivot-table {
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.table-preview-empty,
+.table-preview-note {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin: 4px 0;
+}
+
 .pivot-summary {
   text-align: center;
   color: var(--text-secondary);
