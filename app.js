@@ -997,6 +997,9 @@ function initLinkEditor(row, initialValue) {
     } else if (e.key === 'Backspace' && !entry.value && items.length) {
       removeAt(items.length - 1);
     } else if (e.key === 'Escape') {
+      // Dismiss only the dropdown; the global Escape handler would close
+      // the whole modal and discard the form.
+      e.stopPropagation();
       sug.classList.add('hidden');
     }
   });
@@ -1113,18 +1116,29 @@ let detailHistory = [];
 
 // The Connections block: outgoing link fields grouped by label on a rail,
 // plus "Referenced by" backlinks computed from every other scheme. Both
-// directions are clickable and navigate within the modal. Hidden while
-// filtering so matched link rows aren't rendered twice.
-function renderConnectionsHtml() {
+// directions are clickable and navigate within the modal. This block is the
+// only place link fields appear — they are kept out of the detail rows and
+// the field count below. While filtering, it narrows to matching labels,
+// targets and referrers instead of disappearing.
+function renderConnectionsHtml(query) {
+  const q = (query || '').trim().toLowerCase();
+  const hit = s => !q || String(s).toLowerCase().includes(q);
+
   const outGroups = [];
   detailEntries.forEach(([k, v]) => {
     if (!isLinkKey(k)) return;
     const targets = parseLinkTargets(v);
-    if (targets.length) outGroups.push({ label: linkLabel(k), targets });
+    if (hit(linkLabel(k))) {
+      outGroups.push({ label: linkLabel(k), targets });
+    } else {
+      const matched = targets.filter(hit);
+      if (matched.length) outGroups.push({ label: linkLabel(k), targets: matched });
+    }
   });
-  const backs = getBacklinks(detailSchemeId);
+  const backs = getBacklinks(detailSchemeId).filter(b => hit(b.fromName) || hit(b.label));
 
   if (!outGroups.length && !backs.length) {
+    if (q) return '';
     return `<div class="connections-block">
       <div class="connections-title">Connections</div>
       <p class="connections-none">No linked schemes yet — add one while editing.</p>
@@ -1152,46 +1166,44 @@ function renderConnectionsHtml() {
 
 function renderDetailRows() {
   const query = detailSearchInput.value.toLowerCase();
+  // Link fields live in the Connections block, never among these rows.
+  const plainEntries = detailEntries.filter(([k]) => !isLinkKey(k));
+  const matchesQuery = ([k, v]) =>
+    !query || k.toLowerCase().includes(query) || String(v).toLowerCase().includes(query);
   let rows = '';
-
-  const isLink = ([k]) => isLinkKey(k);
-  const keyText = k => esc(isLinkKey(k) ? linkLabel(k) : k);
 
   if (detailGroups.length > 0 && !query) {
     const groupedKeys = new Set(detailGroups.flatMap(g => g.fields || []));
     detailGroups.forEach(g => {
       const gFields = (g.fields || [])
+        .filter(k => !isLinkKey(k))
         .map(k => [k, detailEntries.find(([ek]) => ek === k)])
         .filter(([, v]) => v !== undefined);
       if (gFields.length === 0) return;
       rows += `<div class="detail-group-header">${esc(g.name)}</div>`;
       gFields.forEach(([k, [, v]]) => {
-        rows += `<div class="detail-row"><span class="detail-key">${keyText(k)}</span><span class="detail-value${isLinkKey(k) ? ' card-links' : ''}">${fieldValueCellHtml(k, v)}</span></div>`;
+        rows += `<div class="detail-row"><span class="detail-key">${esc(k)}</span><span class="detail-value">${esc(v)}</span></div>`;
       });
     });
-    const ungrouped = detailEntries.filter(([k]) => !groupedKeys.has(k) && !isLinkKey(k));
+    const ungrouped = plainEntries.filter(([k]) => !groupedKeys.has(k));
     if (ungrouped.length > 0) {
       ungrouped.forEach(([k, v]) => {
-        rows += `<div class="detail-row"><span class="detail-key">${keyText(k)}</span><span class="detail-value">${esc(v)}</span></div>`;
+        rows += `<div class="detail-row"><span class="detail-key">${esc(k)}</span><span class="detail-value">${esc(v)}</span></div>`;
       });
     }
   } else {
-    const filtered = query
-      ? detailEntries.filter(([k, v]) => k.toLowerCase().includes(query) || String(v).toLowerCase().includes(query))
-      : detailEntries.filter(([k]) => !isLinkKey(k));
+    const filtered = plainEntries.filter(matchesQuery);
     rows = filtered.length
       ? filtered.map(([k, v]) =>
-          `<div class="detail-row"><span class="detail-key">${keyText(k)}</span><span class="detail-value${isLinkKey(k) ? ' card-links' : ''}">${fieldValueCellHtml(k, v)}</span></div>`
+          `<div class="detail-row"><span class="detail-key">${esc(k)}</span><span class="detail-value">${esc(v)}</span></div>`
         ).join('')
       : '<p class="detail-empty">No matching fields</p>';
   }
 
-  const totalVisible = query
-    ? detailEntries.filter(([k, v]) => k.toLowerCase().includes(query) || String(v).toLowerCase().includes(query)).length
-    : detailEntries.length;
+  const visiblePlain = plainEntries.filter(matchesQuery);
 
-  detailModalBody.innerHTML = (query ? '' : renderConnectionsHtml()) + rows;
-  detailFieldCount.textContent = `${totalVisible} of ${detailEntries.length} field${detailEntries.length !== 1 ? 's' : ''}`;
+  detailModalBody.innerHTML = renderConnectionsHtml(query) + rows;
+  detailFieldCount.textContent = `${visiblePlain.length} of ${plainEntries.length} field${plainEntries.length !== 1 ? 's' : ''}`;
 }
 
 function openDetailModal(id, opts = {}) {
@@ -1258,9 +1270,6 @@ detailModalBody.addEventListener('click', e => {
 
 detailModalClose.addEventListener('click', closeDetailModal);
 detailModalCloseBtn.addEventListener('click', closeDetailModal);
-detailModal.addEventListener('click', e => {
-  if (e.target === detailModal) closeDetailModal();
-});
 detailModalEdit.addEventListener('click', () => {
   if (detailSchemeId) editScheme(detailSchemeId);
   closeDetailModal();
@@ -1538,25 +1547,37 @@ async function propagateRenames() {
     for (const s of schemes) {
       if (String(s.id) === String(base.id)) continue;
       const staged = pendingChanges.get(s.id);
-      const sourceFields = (staged && staged.fields) || (getEffective(s.id).fields || {});
-      const fields = { ...sourceFields };
-      let touched = false;
-      Object.keys(fields).forEach(k => {
-        if (!isLinkKey(k)) return;
-        const parts = parseLinkTargets(fields[k]);
-        const next = parts.map(p => (p.toLowerCase() === oldName ? newName : p));
-        if (next.some((p, i) => p !== parts[i])) {
-          fields[k] = next.join(', ');
-          touched = true;
-        }
-      });
-      if (!touched) continue;
-      if (staged && staged.fields) {
-        // Its own commit will persist the rewritten fields.
-        staged.fields = fields;
+      // Mirror commit()'s merge: staged dicts win, otherwise base. Both
+      // visible and hidden link fields must be rewritten.
+      const rewrite = source => {
+        const dict = { ...source };
+        let changed = false;
+        Object.keys(dict).forEach(k => {
+          if (!isLinkKey(k)) return;
+          const parts = parseLinkTargets(dict[k]);
+          const next = parts.map(p => (p.toLowerCase() === oldName ? newName : p));
+          if (next.some((p, i) => p !== parts[i])) {
+            dict[k] = next.join(', ');
+            changed = true;
+          }
+        });
+        return { dict, changed };
+      };
+
+      const effFields = (staged && staged.fields) || getEffective(s.id).fields || {};
+      const effHidden = (staged && staged.hiddenFields) || getEffective(s.id).hiddenFields || {};
+      const fieldsRes = rewrite(effFields);
+      const hiddenRes = rewrite(effHidden);
+      if (!fieldsRes.changed && !hiddenRes.changed) continue;
+
+      if (staged) {
+        // Its own commit will persist the rewritten dicts.
+        if (staged.fields || fieldsRes.changed) staged.fields = fieldsRes.dict;
+        if (staged.hiddenFields || hiddenRes.changed) staged.hiddenFields = hiddenRes.dict;
       } else {
         const target = findScheme(s.id);
-        target.fields = fields;
+        target.fields = fieldsRes.dict;
+        target.hiddenFields = hiddenRes.dict;
         await dbUpdate({ ...target });
       }
     }
