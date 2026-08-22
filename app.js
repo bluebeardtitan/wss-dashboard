@@ -298,12 +298,24 @@ themeToggle.addEventListener('click', () => {
 });
 
 // ========== Toast ==========
+// Toasts share one corner of the screen, so they render into a stack
+// container instead of piling up at identical fixed coordinates.
+let toastStack = null;
+
 function showToast(msg) {
+  if (!toastStack || !toastStack.isConnected) {
+    toastStack = document.createElement('div');
+    toastStack.className = 'toast-stack';
+    document.body.appendChild(toastStack);
+  }
   const t = document.createElement('div');
   t.className = 'toast';
   t.textContent = msg;
-  document.body.appendChild(t);
-  setTimeout(() => t.remove(), 2500);
+  toastStack.appendChild(t);
+  setTimeout(() => {
+    t.remove();
+    if (toastStack && !toastStack.children.length) toastStack.remove();
+  }, 2500);
 }
 
 function showPivotToast(msg) {
@@ -1592,6 +1604,10 @@ function openBulkModal() {
   bulkDynamicFields.innerHTML = '';
   bulkFieldRowIndex = 0;
   bulkGroupRowIndex = 0;
+  // Refresh every suggestion list: the shared tag/link datalists are
+  // otherwise only updated by the single-card edit modal, so opening bulk
+  // directly would offer stale (or empty) suggestions.
+  updateFieldSuggestions();
   updateBulkFieldSuggestions();
   addBulkFieldRow();
   bulkStep1.classList.remove('hidden');
