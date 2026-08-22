@@ -257,7 +257,6 @@ const bulkModalBack = document.getElementById('bulkModalBack');
 const bulkStep1 = document.getElementById('bulkStep1');
 const bulkStep2 = document.getElementById('bulkStep2');
 const bulkGrid = document.getElementById('bulkGrid');
-const bulkBatchChips = document.getElementById('bulkBatchChips');
 const bulkStep2Title = document.getElementById('bulkStep2Title');
 const bulkStep2Desc = document.getElementById('bulkStep2Desc');
 
@@ -1600,12 +1599,6 @@ function openBulkModal() {
   bulkGroupRowIndex = 0;
   updateBulkFieldSuggestions();
   addBulkFieldRow('', '');
-  bulkBatchChips.innerHTML = [...selectedIds]
-    .map(id => {
-      const e = getEffective(id);
-      return `<span class="bulk-chip">${esc(e ? e.name : '(unknown)')}</span>`;
-    })
-    .join('');
   bulkStep1.classList.remove('hidden');
   bulkStep2.classList.add('hidden');
   bulkModalNext.classList.remove('hidden');
@@ -1755,9 +1748,11 @@ bulkModalSave.addEventListener('click', () => {
     }
   });
 
+  const stagedCount = bulkGrid.querySelectorAll('tr[data-scheme-id]').length;
+
   exitSelectionMode();
   closeBulkModal();
-  showToast(`Fields staged for ${selectedIds.size} card(s)`);
+  showToast(`Fields staged for ${stagedCount} card(s)`);
 });
 
 // ========== Commit / Discard ==========
@@ -2461,6 +2456,10 @@ dataDrivePull.addEventListener('click', async () => {
 
 // ========== Click outside to exit selection ==========
 document.addEventListener('click', e => {
+  // A click whose target was removed during dispatch (e.g. a delete-row
+  // button) arrives here detached from the DOM; closest() finds nothing
+  // and it must not be mistaken for an outside click.
+  if (!e.target.isConnected) return;
   if (selectionMode && !e.target.closest('.card') && !e.target.closest('.bulk-action-bar') && !e.target.closest('.modal-overlay')) {
     exitSelectionMode();
   }

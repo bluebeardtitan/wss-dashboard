@@ -718,51 +718,6 @@ body.selection-mode .sel-marker {
   margin-top: 4px;
 }
 
-.bulk-batch-block {
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
-}
-
-.bulk-batch-label {
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-  margin-bottom: 8px;
-}
-
-.bulk-batch-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.bulk-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--primary);
-  background: var(--primary-light);
-  border: 1px solid var(--primary-light);
-  border-radius: 999px;
-  padding: 3px 10px;
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.bulk-chip::before {
-  content: '▣';
-  font-size: 0.7rem;
-  color: var(--primary);
-  flex-shrink: 0;
-}
-
 /* ========== Bulk Grid ========== */
 .bulk-grid {
   max-height: 55vh;
