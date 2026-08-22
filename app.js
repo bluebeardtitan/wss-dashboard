@@ -456,6 +456,7 @@ function render() {
 
     return `
       <div class="${classes.join(' ')}" data-id="${s.id}">
+        <span class="sel-marker" aria-hidden="true"></span>
         <div class="card-header">
           ${nameHtml}${hiddenBadge}${pendingBadge}
           <div class="card-actions">
