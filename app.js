@@ -1532,27 +1532,23 @@ function addBulkFieldRow(key = '') {
   bulkDynamicFields.appendChild(row);
 }
 
-function addBulkLinkRow(label = '', value = '') {
+// Bulk rows define field NAMES only — values are entered per card in
+// step 2's grid, so there is deliberately no value editor here.
+function addBulkLinkRow(label = '') {
   const idx = bulkFieldRowIndex++;
   const row = document.createElement('div');
   row.className = 'dynamic-field-row link-row';
   row.innerHTML = `
     <span class="drag-handle" draggable="true">⠿</span>
     <input type="text" class="field-key-input" name="bulk_field_key_${idx}" placeholder="Link label (e.g. Feeds)" value="${esc(label ? '→ ' + label : '')}" list="linkLabelSuggestions" />
-    <div class="link-editor">
-      <span class="link-chips"></span>
-      <input type="text" class="link-entry" placeholder="Add scheme…" autocomplete="off" />
-      <input type="hidden" class="field-value-input" value="${escAttr(value)}" />
-    </div>
     <button class="remove-field" type="button">&times;</button>
   `;
-  initLinkEditor(row, value);
   row.querySelector('.remove-field').addEventListener('click', () => row.remove());
   initDragHandle(row);
   bulkDynamicFields.appendChild(row);
 }
 
-function addBulkTagRow(label = '', value = '') {
+function addBulkTagRow(label = '') {
   const idx = bulkFieldRowIndex++;
   const row = document.createElement('div');
   row.className = 'dynamic-field-row tag-row';
@@ -1560,7 +1556,6 @@ function addBulkTagRow(label = '', value = '') {
     <span class="drag-handle" draggable="true">⠿</span>
     <span class="row-type-icon" aria-hidden="true">🏷️</span>
     <input type="text" class="field-key-input" name="bulk_field_key_${idx}" placeholder="Tag name" value="${esc(label)}" list="tagNameSuggestions" />
-    <input type="text" class="field-value-input" name="bulk_field_value_${idx}" placeholder="Value (optional)" value="${esc(value)}" />
     <button class="remove-field" type="button">&times;</button>
   `;
   row.querySelector('.remove-field').addEventListener('click', () => row.remove());
@@ -1598,7 +1593,7 @@ function openBulkModal() {
   bulkFieldRowIndex = 0;
   bulkGroupRowIndex = 0;
   updateBulkFieldSuggestions();
-  addBulkFieldRow('', '');
+  addBulkFieldRow();
   bulkStep1.classList.remove('hidden');
   bulkStep2.classList.add('hidden');
   bulkModalNext.classList.remove('hidden');
@@ -1617,10 +1612,10 @@ bulkModalCancel.addEventListener('click', closeBulkModal);
 bulkModal.addEventListener('click', e => {
   if (e.target === bulkModal) closeBulkModal();
 });
-bulkAddFieldBtn.addEventListener('click', () => addBulkFieldRow('', ''));
-bulkAddGroupBtn.addEventListener('click', () => addBulkGroupRow(''));
-bulkAddLinkBtn.addEventListener('click', () => addBulkLinkRow('', ''));
-bulkAddTagBtn.addEventListener('click', () => addBulkTagRow('', ''));
+bulkAddFieldBtn.addEventListener('click', () => addBulkFieldRow());
+bulkAddGroupBtn.addEventListener('click', () => addBulkGroupRow());
+bulkAddLinkBtn.addEventListener('click', () => addBulkLinkRow());
+bulkAddTagBtn.addEventListener('click', () => addBulkTagRow());
 
 bulkModalNext.addEventListener('click', () => {
   const { rows, groups } = parseFieldRows(bulkDynamicFields);

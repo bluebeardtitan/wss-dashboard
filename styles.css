@@ -947,6 +947,12 @@ tr.bulk-row-active td:not(.bulk-grid-scheme-col) {
   box-shadow: 0 0 0 2px rgba(245,158,11,0.18);
 }
 
+/* Bulk tag rows carry the name only (values are set per card in step 2),
+   so the name input fills the row instead of sharing it with a value field. */
+#bulkDynamicFields .tag-row .field-key-input {
+  flex: 1 1 auto;
+}
+
 .hidden-fields-toggle {
   margin-top: 8px;
   font-size: 0.8rem;
