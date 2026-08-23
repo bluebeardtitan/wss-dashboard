@@ -1,18 +1,18 @@
 # Search guide
 
-The search box matches either plain text or logical expressions. Type normally for text matching; switch to expression syntax when you need to filter on values.
+Search has two modes. **Text mode** matches plain text. **Expression mode** (ƒx) filters with logical expressions.
 
-The **ƒx?** button next to the search box shows this reference with your live fields, and the box itself suggests field names, operators, and sample values as you type.
+- Type normally in the search box for text matching — nothing is compiled, so `done & wip` finds that literal text.
+- Press the **ƒx** button to compose an expression in the filter editor: a live match count, your fields, operators, and examples are all one click away there. Applying it puts the header into expression mode and shows the filter as a pill; click the pill to edit it again, or its × to remove the filter.
+- The two modes each remember their own query — switching between them swaps filters without losing either.
 
 ## Plain text
 
 Case-insensitive substring match against card names, field names, and field values. `pump` matches cards named Pump House and any card whose notes contain "pumping".
 
-A query stays plain text unless it contains a field reference or a comparison operator, so searches like `done & wip` find that literal text rather than erroring.
-
 ## Expressions
 
-Any query containing `field:"..."` or a comparison operator is compiled as an expression and tested against every visible card. Only cards where it evaluates to exactly `true` are shown.
+In expression mode every query is compiled as a filtrex expression and tested against every visible card. Only cards where it evaluates to exactly `true` are shown.
 
 ### Referring to fields
 
@@ -105,7 +105,7 @@ Quoted literals fail with `in` for numeric fields: `in ("11045", ...)` compares 
 
 ## When a query is invalid
 
-An expression that looks like an expression but fails to compile marks the search box red and appends "— invalid expression" to the results line. Nothing matches until the syntax is fixed. Runtime problems (for example a regex that never finishes) simply exclude that card instead of breaking the list.
+An expression that fails to compile cannot be applied — the editor's status line explains and the Apply button stays disabled. An invalid filter already active (for example after data changes) marks the search bar red and appends "— invalid expression" to the results line; nothing matches until it is fixed or removed. Runtime problems (for example a regex that never finishes) simply exclude that card instead of breaking the list.
 
 ## Where search applies
 

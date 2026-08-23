@@ -372,13 +372,10 @@ function updatePendingBar() {
 function render() {
   const visibleSchemes = schemes.filter(s => showHidden ? true : !s.hidden);
   const filtered = visibleSchemes.filter(s => schemeMatchesQuery(getEffective(s.id)));
-  const searchTrimmed = searchQuery.trim();
-  const searchCompiled = searchTrimmed ? compileSearchQuery(searchTrimmed) : null;
-  const searchInvalid = !!(searchCompiled && searchCompiled.invalid);
-  const searchIsExpr = !!(searchCompiled && !searchCompiled.invalid);
-  searchWrapper.classList.toggle('search-invalid', searchInvalid);
-  searchWrapper.classList.toggle('search-is-expr', searchIsExpr);
-  updateSearchModeChip(searchInvalid, searchIsExpr);
+  const exprActive = searchMode === 'expr';
+  const exprInvalid = exprActive && !!exprFilter && isExprInvalid(exprFilter);
+  searchWrapper.classList.toggle('search-invalid', exprInvalid);
+  syncHeaderChrome();
   invalidateSearchSchema();
 
   const hiddenCount = schemes.filter(s => s.hidden).length;
@@ -389,7 +386,7 @@ function render() {
   const newPending = [...pendingChanges.keys()].filter(isNewId).length;
   const totalPending = pendingCount + newPending;
 
-  statsBar.textContent = `${filtered.length} of ${visibleSchemes.length} card${visibleSchemes.length !== 1 ? 's' : ''}${showHidden && hiddenCount ? ` (${hiddenCount} hidden)` : ''}${totalPending ? ` — ${totalPending} unsaved` : ''}${searchInvalid ? ' — invalid expression' : ''}`;
+  statsBar.textContent = `${filtered.length} of ${visibleSchemes.length} card${visibleSchemes.length !== 1 ? 's' : ''}${showHidden && hiddenCount ? ` (${hiddenCount} hidden)` : ''}${totalPending ? ` — ${totalPending} unsaved` : ''}${exprActive ? ' — ƒx filter' : ''}${exprInvalid ? ' — invalid expression' : ''}`;
 
   updatePendingBar();
 
@@ -1408,15 +1405,15 @@ searchInput.addEventListener('input', e => {
   searchTimer = setTimeout(() => render(), 100);
 });
 
-// ========== Expression Search ==========
-// Queries containing field:"Name" references or comparison operators are
-// compiled with filtrex (vendored at vendor/filtrex.js) and evaluated per
-// scheme; everything else stays a plain substring search. Supported syntax:
-// and/or/not, == != > >= < <=, ~= (regex), if/then/else, exists(), empty(),
-// arithmetic. Bare words resolve against field names case-insensitively and
-// `name` is the scheme name. Numeric-looking values compare as numbers.
+// ========== Expression Filter ==========
+// Expressions are compiled with filtrex (vendored at vendor/filtrex.js) and
+// evaluated per scheme. Supported syntax: and/or/not, == != > >= < <=,
+// ~= (regex), if/then/else, exists(), empty(), arithmetic. Bare words
+// resolve against field names case-insensitively and `name` is the scheme
+// name. Numeric-looking values compare as numbers. Expressions live only in
+// expression mode (see "Expression Filter UI" below) — plain text search
+// never compiles anything.
 const EXPR_FIELD_RE = /field\s*:\s*(?:"([^"]*)"|'([^']*)')/gi;
-const EXPR_OPS_RE = /==|!=|>=|<=|~=|[A-Za-z0-9_)"']\s*[<>]\s*[0-9"']/;
 
 function preprocessExprQuery(q) {
   return q.replace(EXPR_FIELD_RE, (m, dq, sq) => {
@@ -1459,11 +1456,10 @@ function lookupExprField(fields, name) {
 let exprCurrentFields = {};
 const exprCache = new Map();
 
-// Returns { fn } when the query compiles, { invalid: true } when it looks
-// like an expression but does not compile, or null for plain text queries.
+// Compiles the query as a filtrex expression: { fn } on success,
+// { invalid: true } on syntax errors. Only called in expression mode —
+// text mode never compiles.
 function compileSearchQuery(q) {
-  EXPR_FIELD_RE.lastIndex = 0;
-  if (!EXPR_FIELD_RE.test(q) && !EXPR_OPS_RE.test(q)) return null;
   if (exprCache.has(q)) return exprCache.get(q);
   if (exprCache.size > 100) exprCache.clear();
   let result;
@@ -1485,21 +1481,40 @@ function compileSearchQuery(q) {
   return result;
 }
 
+// ---------- Two search modes ----------
+// 'text': substring across the name, field keys and values — nothing is
+// compiled. 'expr': exprFilter (composed in the query editor modal) always
+// evaluates as filtrex, even bare words, because the user chose this mode.
+// Each mode keeps its own query; switching swaps between them without loss.
+let searchMode = 'text';
+let exprFilter = '';
+
+function evalCompiledExpr(compiled, e) {
+  exprCurrentFields = e.fields || {};
+  // filtrex returns runtime errors as truthy Error objects; only a real
+  // boolean true counts as a match.
+  try {
+    return compiled.fn(Object.assign({}, e.fields, { name: e.name })) === true;
+  } catch (err) {
+    return false;
+  }
+}
+
+function isExprInvalid(q) {
+  if (!q) return false;
+  const c = compileSearchQuery(q);
+  return !!(c && c.invalid);
+}
+
 function schemeMatchesQuery(e) {
+  if (searchMode === 'expr') {
+    if (!exprFilter) return true;
+    const compiled = compileSearchQuery(exprFilter);
+    if (!compiled || compiled.invalid) return false;
+    return evalCompiledExpr(compiled, e);
+  }
   const q = searchQuery.trim();
   if (!q) return true;
-  const compiled = compileSearchQuery(q);
-  if (compiled) {
-    if (compiled.invalid) return false;
-    exprCurrentFields = e.fields || {};
-    // filtrex returns runtime errors as truthy Error objects; only a real
-    // boolean true counts as a match.
-    try {
-      return compiled.fn(Object.assign({}, e.fields, { name: e.name })) === true;
-    } catch (err) {
-      return false;
-    }
-  }
   const lq = q.toLowerCase();
   return (e.name || '').toLowerCase().includes(lq) ||
     Object.entries(e.fields || {}).some(([k, v]) =>
@@ -1508,25 +1523,30 @@ function schemeMatchesQuery(e) {
     );
 }
 
-// ========== Search Assist ==========
-// The expression language is only useful if it can be discovered. Three
-// affordances hang off the search bar: a schema-live suggestion dropdown
-// (fields → operators → sample values, all from the user's own data), a
-// mode lamp stating whether the query is plain text or a compiled
-// expression, and an ƒx reference panel that mirrors SEARCH.md. Inserted
-// values follow the documented typing rules: numeric-looking literals go
-// bare so `in (11045)` matches numbers, everything else is quoted.
+// ========== Expression Filter UI ==========
+// Expressions are composed in a dedicated editor modal launched from the ƒx
+// toggle, and reopened any time by clicking the active-filter pill. The
+// editor keeps the schema-live affordances that make the language
+// discoverable: a suggestion dropdown driven by the caret context (fields →
+// operators → sample values, all from the user's own data), snippet
+// sections mirroring SEARCH.md, click-to-load examples, and a live match
+// count so applying a filter is never a guess. Inserted values follow the
+// documented typing rules: numeric-looking literals go bare so `in (11045)`
+// matches numbers, everything else is quoted.
 const searchClearBtn = document.getElementById('searchClearBtn');
-const searchModeChip = document.getElementById('searchModeChip');
-const searchHelpBtn = document.getElementById('searchHelpBtn');
-const searchSuggest = document.getElementById('searchSuggest');
-const searchHelpPanel = document.getElementById('searchHelpPanel');
-
-function updateSearchModeChip(invalid, isExpr) {
-  if (!searchModeChip) return;
-  searchModeChip.textContent = invalid ? '!' : 'ƒx';
-  searchModeChip.classList.toggle('off', !invalid && !isExpr);
-}
+const exprModeBtn = document.getElementById('exprModeBtn');
+const exprPill = document.getElementById('exprPill');
+const exprPillText = document.getElementById('exprPillText');
+const exprPillExit = document.getElementById('exprPillExit');
+const queryModal = document.getElementById('queryModal');
+const queryModalClose = document.getElementById('queryModalClose');
+const exprInput = document.getElementById('exprInput');
+const exprSuggest = document.getElementById('exprSuggest');
+const exprStatus = document.getElementById('exprStatus');
+const querySections = document.getElementById('querySections');
+const exprRemoveBtn = document.getElementById('exprRemoveBtn');
+const exprCancelBtn = document.getElementById('exprCancelBtn');
+const exprApplyBtn = document.getElementById('exprApplyBtn');
 
 // ---------- Live schema ----------
 let searchSchemaCache = null;
@@ -1753,32 +1773,15 @@ function buildSuggestions(ctx) {
   return [];
 }
 
-const STARTER_EXAMPLES = [
-  { q: 'Status == "Completed"', d: 'exact value' },
-  { q: 'field:"Demand(MLD)" > 400', d: 'numeric compare' },
-  { q: 'not empty(field:"Notes")', d: 'has notes' }
-];
-
-function buildEmptyFocusSuggestions() {
-  return [{
-    label: 'Try an expression',
-    items: STARTER_EXAMPLES.map(ex => ({
-      glyph: '✦', name: ex.q, meta: ex.d, insert: ex.q, replaceAll: true
-    }))
-  }];
-}
-
-// ---------- Dropdown rendering & keyboard ----------
+// ---------- Suggestion dropdown (editor textarea) ----------
 let suggestItems = [];
 let suggestActive = -1;
-let suggestOpen = false;
 
 function hideSuggest() {
-  suggestOpen = false;
+  suggestItems = [];
   suggestActive = -1;
-  searchSuggest.classList.add('hidden');
-  searchInput.setAttribute('aria-expanded', 'false');
-  searchInput.removeAttribute('aria-activedescendant');
+  exprSuggest.classList.add('hidden');
+  exprInput.removeAttribute('aria-activedescendant');
 }
 
 function renderSuggest(groups) {
@@ -1799,20 +1802,18 @@ function renderSuggest(groups) {
       return row;
     }).join('');
   });
-  searchSuggest.innerHTML = html;
-  searchSuggest.classList.remove('hidden');
-  if (!searchSuggest._glowInit) { initScrollGlow(searchSuggest); searchSuggest._glowInit = true; }
-  suggestOpen = true;
-  searchInput.setAttribute('aria-expanded', 'true');
+  exprSuggest.innerHTML = html;
+  exprSuggest.classList.remove('hidden');
+  if (!exprSuggest._glowInit) { initScrollGlow(exprSuggest); exprSuggest._glowInit = true; }
 }
 
 function applySuggestItem(item) {
   if (item.replaceAll) {
-    searchInput.value = item.insert;
+    exprInput.value = item.insert;
   } else {
-    const v = searchInput.value;
-    const selStart = searchInput.selectionStart ?? v.length;
-    const selEnd = searchInput.selectionEnd ?? v.length;
+    const v = exprInput.value;
+    const selStart = exprInput.selectionStart ?? v.length;
+    const selEnd = exprInput.selectionEnd ?? v.length;
     const ctx = getAssistContext(v, selStart);
     // Inside an open field:"…" or "…" literal the wrapper already exists
     // on the page: only the content goes between the quotes, and the
@@ -1824,67 +1825,107 @@ function applySuggestItem(item) {
       if (v.charAt(Math.max(selEnd, selStart)) !== q) text += q;
     }
     const start = ctx ? Math.min(ctx.start ?? selStart, selStart) : selStart;
-    searchInput.value = v.slice(0, start) + text + v.slice(Math.max(selEnd, selStart));
+    exprInput.value = v.slice(0, start) + text + v.slice(Math.max(selEnd, selStart));
     let pos = start + text.length;
     if (item.caretIn !== undefined && text === item.insert) pos = start + item.caretIn;
     else if (ctx && ctx.inString && v.charAt(Math.max(selEnd, selStart)) === '"') pos = start + item.inner.length + 1;
-    searchInput.setSelectionRange(pos, pos);
+    exprInput.setSelectionRange(pos, pos);
   }
   hideSuggest();
-  searchInput.focus();
-  searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+  exprInput.focus();
+  refreshExprAssist();
+  scheduleExprStatus();
 }
 
 function moveSuggestActive(dir) {
-  if (!suggestOpen || !suggestItems.length) return;
+  if (!suggestItems.length || exprSuggest.classList.contains('hidden')) return;
   const count = suggestItems.length;
   suggestActive = dir > 0
     ? (suggestActive + 1) % count
     : (suggestActive <= 0 ? count - 1 : suggestActive - 1);
-  searchSuggest.querySelectorAll('.ss-item').forEach((el, idx) =>
+  exprSuggest.querySelectorAll('.ss-item').forEach((el, idx) =>
     el.classList.toggle('active', idx === suggestActive));
-  const el = searchSuggest.querySelector(`#ss-opt-${suggestActive}`);
+  const el = exprSuggest.querySelector(`#ss-opt-${suggestActive}`);
   if (el) {
     el.scrollIntoView({ block: 'nearest' });
-    searchInput.setAttribute('aria-activedescendant', el.id);
+    exprInput.setAttribute('aria-activedescendant', el.id);
   }
 }
 
-searchSuggest.addEventListener('mousedown', e => {
-  const b = e.target.closest('.ss-item');
-  if (!b) return;
-  e.preventDefault(); // keep focus in the input
-  applySuggestItem(suggestItems[Number(b.dataset.i)]);
-});
-
-// ---------- Input wiring ----------
-function runAssist() {
-  const v = searchInput.value;
-  searchClearBtn.classList.toggle('hidden', v.length === 0);
-  if (!v.trim()) {
-    // Empty box: offer starting points instead of nothing.
-    if (document.activeElement === searchInput) {
-      renderSuggest(buildEmptyFocusSuggestions());
-    } else {
-      hideSuggest();
-    }
-    return;
-  }
-  const ctx = getAssistContext(v, searchInput.selectionStart ?? v.length);
+// ---------- Editor wiring ----------
+function refreshExprAssist() {
+  const v = exprInput.value;
+  if (!v.trim()) { hideSuggest(); return; }
+  const ctx = getAssistContext(v, exprInput.selectionStart ?? v.length);
   if (!ctx) { hideSuggest(); return; }
   const groups = buildSuggestions(ctx).filter(g => g.items.length);
   if (!groups.length) { hideSuggest(); return; }
   renderSuggest(groups);
 }
 
-searchInput.addEventListener('input', () => {
-  searchClearBtn.classList.toggle('hidden', searchInput.value.length === 0);
-  runAssist();
+let exprStatusTimer = null;
+
+function scheduleExprStatus() {
+  clearTimeout(exprStatusTimer);
+  exprStatusTimer = setTimeout(updateExprStatus, 120);
+}
+
+// Live preview of what applying would do: null means "does not compile".
+function countExprMatches(q) {
+  const compiled = compileSearchQuery(q);
+  if (!compiled || compiled.invalid) return null;
+  let n = 0;
+  schemes.forEach(s => {
+    if (!showHidden && s.hidden) return;
+    if (evalCompiledExpr(compiled, getEffective(s.id))) n++;
+  });
+  return n;
+}
+
+function updateExprStatus() {
+  clearTimeout(exprStatusTimer);
+  exprStatusTimer = null;
+  const q = exprInput.value.trim();
+  if (!q) {
+    exprStatus.className = 'expr-status';
+    exprStatus.textContent = 'Type an expression, or pick fields and examples below.';
+    exprApplyBtn.disabled = true;
+    return;
+  }
+  const total = schemes.filter(s => showHidden || !s.hidden).length;
+  const n = countExprMatches(q);
+  exprApplyBtn.disabled = n === null;
+  if (n === null) {
+    exprStatus.className = 'expr-status err';
+    exprStatus.textContent = 'Invalid expression — check quotes, parentheses and operators.';
+  } else {
+    exprStatus.className = 'expr-status ok';
+    exprStatus.textContent = `${n} of ${total} card${total !== 1 ? 's' : ''} match`;
+  }
+}
+
+exprInput.addEventListener('input', () => {
+  refreshExprAssist();
+  scheduleExprStatus();
 });
-searchInput.addEventListener('focus', () => { if (!searchInput.value.trim()) runAssist(); });
-searchInput.addEventListener('blur', () => setTimeout(hideSuggest, 120));
-searchInput.addEventListener('keydown', e => {
-  if (suggestOpen) {
+exprInput.addEventListener('focus', () => {
+  // A fresh editor grounds the user immediately in their own fields.
+  if (!exprInput.value.trim()) {
+    const entries = [...getSearchSchema().entries()]
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, 8)
+      .map(([name]) => ({
+        glyph: '▸', name, meta: name === 'name' ? 'card name' : 'field',
+        insert: 'field:"' + name.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"',
+        inner: name
+      }));
+    renderSuggest([{ label: 'Your fields', items: entries }]);
+  }
+});
+exprInput.addEventListener('blur', () => setTimeout(hideSuggest, 120));
+exprInput.addEventListener('keydown', e => {
+  const listOpen = suggestItems.length > 0 && !exprSuggest.classList.contains('hidden');
+  if (listOpen) {
     if (e.key === 'ArrowDown') { e.preventDefault(); moveSuggestActive(1); return; }
     if (e.key === 'ArrowUp') { e.preventDefault(); moveSuggestActive(-1); return; }
     if ((e.key === 'Enter' || e.key === 'Tab') && suggestActive >= 0) {
@@ -1893,24 +1934,31 @@ searchInput.addEventListener('keydown', e => {
       return;
     }
     if (e.key === 'Escape') {
+      // Dismiss the dropdown first; only a second Esc reaches the modal.
       e.preventDefault();
-      e.stopPropagation(); // dismiss the dropdown, not the app state
+      e.stopPropagation();
       hideSuggest();
       return;
     }
   }
-  if (e.key === 'Escape' && !searchHelpPanel.classList.contains('hidden')) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
     e.preventDefault();
-    e.stopPropagation();
-    closeSearchHelp();
+    applyExprFromEditor();
   }
+});
+
+exprSuggest.addEventListener('mousedown', e => {
+  const b = e.target.closest('.ss-item');
+  if (!b) return;
+  e.preventDefault(); // keep focus in the textarea
+  applySuggestItem(suggestItems[Number(b.dataset.i)]);
 });
 
 searchClearBtn.addEventListener('click', () => {
   searchInput.value = '';
-  hideSuggest();
-  searchInput.focus();
+  searchClearBtn.classList.add('hidden');
   searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+  searchInput.focus();
 });
 
 // ---------- Reference panel (ƒx?) ----------
@@ -1963,7 +2011,8 @@ const HELP_EXAMPLES = [
   { q: 'max(field:"Phase 1", field:"Phase 2") >= 3', d: 'functions' }
 ];
 
-function buildHelpPanel() {
+// ---------- Editor sections ----------
+function buildQuerySections() {
   const sections = HELP_SECTIONS.map(s => `
     <div class="sh-section">
       <h4>${esc(s.title)}</h4>
@@ -1972,83 +2021,112 @@ function buildHelpPanel() {
       ).join('')}</div>
       ${s.note ? `<p class="sh-note">${esc(s.note)}</p>` : ''}
     </div>`).join('');
-  searchHelpPanel.innerHTML = `
-    <div class="sh-head">
-      <span class="sh-title">Query reference</span>
-      <kbd class="sh-kbd">Ctrl K</kbd>
-      <button class="sh-close" aria-label="Close reference">&times;</button>
-    </div>
+  querySections.innerHTML = `
     <div class="sh-section">
       <h4>Your fields <em>· click to insert</em></h4>
-      <div class="sh-grid" id="shFieldGrid">${fieldChipsForHelp()}</div>
+      <div class="sh-grid">${fieldChipsForHelp()}</div>
     </div>
     ${sections}
     <div class="sh-section">
-      <h4>Examples <em>· click to run</em></h4>
+      <h4>Examples <em>· click to load</em></h4>
       ${HELP_EXAMPLES.map(ex =>
         `<button type="button" class="sh-example" data-example="${escAttr(ex.q)}"><code>${esc(ex.q)}</code><span>${esc(ex.d)}</span></button>`
       ).join('')}
     </div>`;
-  initScrollGlow(searchHelpPanel);
 }
 
-function openSearchHelp() {
-  if (searchHelpPanel.classList.contains('hidden')) buildHelpPanel();
-  document.getElementById('shFieldGrid').innerHTML = fieldChipsForHelp();
-  searchHelpPanel.classList.remove('hidden');
-  searchHelpBtn.classList.add('active');
-  searchHelpBtn.setAttribute('aria-expanded', 'true');
-  hideSuggest();
-}
-
-function closeSearchHelp() {
-  searchHelpPanel.classList.add('hidden');
-  searchHelpBtn.classList.remove('active');
-  searchHelpBtn.setAttribute('aria-expanded', 'false');
-}
-
-searchHelpBtn.addEventListener('click', () => {
-  if (searchHelpPanel.classList.contains('hidden')) openSearchHelp();
-  else closeSearchHelp();
-});
-
-searchHelpPanel.addEventListener('mousedown', e => {
-  const close = e.target.closest('.sh-close');
+querySections.addEventListener('mousedown', e => {
   const chip = e.target.closest('.sh-chip[data-insert]');
   const tpl = e.target.closest('.sh-chip[data-tpl]');
   const example = e.target.closest('.sh-example[data-example]');
-  e.preventDefault(); // keep focus in the input while inserting
-  if (close) { closeSearchHelp(); return; }
+  if (!chip && !tpl && !example) return;
+  e.preventDefault(); // keep focus in the textarea while inserting
   if (tpl) {
     const fn = tpl.textContent.trim().replace(/\(field:""\)$/, '');
-    insertIntoSearch(`${fn}(field:"")`, fn.length + 8);
+    insertIntoExpr(`${fn}(field:"")`, fn.length + 8);
     return;
   }
-  if (chip) { insertIntoSearch(chip.dataset.insert); return; }
-  if (example) {
-    searchInput.value = example.dataset.example;
-    searchInput.dispatchEvent(new Event('input', { bubbles: true }));
-    searchInput.focus();
-    closeSearchHelp();
-  }
+  if (chip) { insertIntoExpr(chip.dataset.insert); return; }
+  exprInput.value = example.dataset.example;
+  exprInput.setSelectionRange(exprInput.value.length, exprInput.value.length);
+  updateExprStatus();
 });
 
-function insertIntoSearch(text, caretIn) {
-  const v = searchInput.value;
-  const c = searchInput.selectionStart ?? v.length;
-  searchInput.value = v.slice(0, c) + text + v.slice(searchInput.selectionEnd ?? c);
+function insertIntoExpr(text, caretIn) {
+  const v = exprInput.value;
+  const c = exprInput.selectionStart ?? v.length;
+  exprInput.value = v.slice(0, c) + text + v.slice(exprInput.selectionEnd ?? c);
   const pos = c + (caretIn !== undefined ? caretIn : text.length);
-  searchInput.setSelectionRange(pos, pos);
-  searchInput.focus();
-  searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+  exprInput.setSelectionRange(pos, pos);
+  exprInput.focus();
+  refreshExprAssist();
+  scheduleExprStatus();
 }
 
-// Close search popups when clicking anywhere outside the deck.
-document.addEventListener('click', e => {
-  if (!e.target.closest('.search-shell')) {
-    if (suggestOpen) hideSuggest();
-    if (!searchHelpPanel.classList.contains('hidden')) closeSearchHelp();
+// ---------- Modal lifecycle ----------
+function syncHeaderChrome() {
+  const exprActive = searchMode === 'expr';
+  // In expression mode the input yields to a pill naming the filter, so
+  // the mode is legible at a glance.
+  searchWrapper.classList.toggle('mode-expr', exprActive);
+  exprPill.classList.toggle('hidden', !exprActive);
+  if (exprActive && exprPillText.textContent !== exprFilter) {
+    exprPillText.textContent = exprFilter;
+    exprPill.title = `Filtering by: ${exprFilter}`;
   }
+  exprModeBtn.classList.toggle('active', exprActive);
+  searchClearBtn.classList.toggle('hidden', exprActive || searchInput.value.length === 0);
+}
+
+function openQueryModal() {
+  exprInput.value = exprFilter;
+  buildQuerySections();
+  exprRemoveBtn.classList.toggle('hidden', !(searchMode === 'expr' && exprFilter));
+  hideSuggest();
+  updateExprStatus();
+  queryModal.classList.remove('hidden');
+  exprInput.focus();
+  exprInput.setSelectionRange(exprInput.value.length, exprInput.value.length);
+}
+
+function closeQueryModal() {
+  queryModal.classList.add('hidden');
+  clearTimeout(exprStatusTimer);
+  exprStatusTimer = null;
+  hideSuggest();
+}
+
+function applyExprFromEditor() {
+  const q = exprInput.value.trim();
+  if (!q || isExprInvalid(q)) { updateExprStatus(); return; }
+  exprFilter = q;
+  searchMode = 'expr';
+  syncHeaderChrome();
+  render();
+  closeQueryModal();
+  const matches = countExprMatches(q);
+  showToast(`ƒx filter applied · ${matches} matching card${matches === 1 ? '' : 's'}`);
+}
+
+function exitExprMode() {
+  searchMode = 'text';
+  exprFilter = '';
+  syncHeaderChrome();
+  render();
+}
+
+exprApplyBtn.addEventListener('click', applyExprFromEditor);
+exprCancelBtn.addEventListener('click', closeQueryModal);
+queryModalClose.addEventListener('click', closeQueryModal);
+queryModal.addEventListener('click', e => { if (e.target === queryModal) closeQueryModal(); });
+exprRemoveBtn.addEventListener('click', () => { exitExprMode(); closeQueryModal(); });
+exprModeBtn.addEventListener('click', openQueryModal);
+exprPill.addEventListener('click', openQueryModal);
+exprPillExit.addEventListener('click', e => {
+  // The pill opens the editor; × only removes the filter.
+  e.stopPropagation();
+  exitExprMode();
+  searchInput.focus();
 });
 
 // ========== Bulk Operations ==========
@@ -3060,12 +3138,16 @@ document.addEventListener('click', e => {
 extractTokenFromHash();
 loadSchemes();
 
-// Keyboard shortcut: Ctrl+K focuses search, Escape exits
+// Keyboard shortcut: Ctrl+K focuses search (or opens the expression editor
+// while a filter is active), Escape exits
 document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
     e.preventDefault();
-    searchInput.focus();
-    searchInput.select();
+    if (searchMode === 'expr') openQueryModal();
+    else {
+      searchInput.focus();
+      searchInput.select();
+    }
   }
   if (e.key === 'Escape') {
     if (!schemeModal.classList.contains('hidden')) closeModal();
@@ -3073,9 +3155,9 @@ document.addEventListener('keydown', e => {
     else if (!detailModal.classList.contains('hidden')) closeDetailModal();
     else if (!bulkModal.classList.contains('hidden')) closeBulkModal();
     else if (!dataMenuModal.classList.contains('hidden')) closeDataMenuModal();
-    // The reference panel is lighter than a modal: it yields before
-    // selection mode does, so Escape peels layers instead of nuking state.
-    else if (!searchHelpPanel.classList.contains('hidden')) closeSearchHelp();
+    // The query editor yields before selection mode does, so Escape peels
+    // layers instead of nuking state.
+    else if (!queryModal.classList.contains('hidden')) closeQueryModal();
     else if (selectionMode) exitSelectionMode();
   }
 });
