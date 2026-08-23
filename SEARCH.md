@@ -22,6 +22,7 @@ Any query containing `field:"..."` or a comparison operator is compiled as an ex
 
 - `field:"..."` is the reliable form. It handles spaces, brackets, and punctuation: `field:"No. of Villages" < 2`
 - Names match case-insensitively: `field:"district"` finds "District".
+- Tags work like any field. They are stored as `#Name` but you can write them either way: `field:"Priority" == "High"` and `field:"#Priority" == "High"` both find the tag named Priority. Bare words resolve too (`priority == "High"`), and `empty(field:"Priority")` correctly reports a card lacking that tag.
 - Bare words resolve against field names the same way, but only when they have no spaces or special characters.
 - `name` is the card's own name: `name ~= "^Kerala"`.
 
@@ -47,6 +48,22 @@ Two exist specifically for data checking:
 
 - `exists(field:"Notes")` — true when the field is present and not null.
 - `empty(field:"Notes")` — true when missing, blank, or an empty array. Combine with `not`: `not empty(field:"Phone")`.
+
+### Testing "blank" fields and negating comparisons
+
+Use `empty()` to find cards where a field is absent or blank — `== ""` alone cannot see missing fields, because they read as undefined rather than an empty string:
+
+```
+empty(field:"RPWSS ID") and not (field:"Scheme Dropped" == "TRUE")
+```
+
+Parenthesize negated comparisons. `not x == y` parses as `(not x) == y` — a logical value compared against text — which matches nothing. Write `not (x == y)` instead.
+
+Equality is exact, including capitalization: `"True"` ≠ `"TRUE"`. To ignore case, test characters explicitly:
+
+```
+not (field:"Scheme Dropped" ~= "^[Tt][Rr][Uu][Ee]$")
+```
 
 ### Values and types
 

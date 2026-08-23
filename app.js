@@ -1428,12 +1428,22 @@ function coerceFieldValue(v) {
 }
 
 function lookupExprField(fields, name) {
-  if (fields && Object.prototype.hasOwnProperty.call(fields, name)) {
-    return coerceFieldValue(fields[name]);
+  if (!fields) return undefined;
+  const raw = String(name).trim();
+  if (Object.prototype.hasOwnProperty.call(fields, raw)) {
+    return coerceFieldValue(fields[raw]);
   }
-  const lower = String(name).trim().toLowerCase();
-  for (const k of Object.keys(fields || {})) {
-    if (k.trim().toLowerCase() === lower) return coerceFieldValue(fields[k]);
+  // Tags are stored as "#Name" but shown without the marker, so resolve
+  // either spelling: try as typed, then cross the # boundary.
+  const tries = [raw];
+  const stripped = raw.replace(/^#+\s*/, '');
+  if (stripped !== raw) tries.push(stripped);
+  else if (stripped) tries.push('#' + stripped);
+  for (const t of tries) {
+    const tl = t.toLowerCase();
+    for (const k of Object.keys(fields)) {
+      if (k.trim().toLowerCase() === tl) return coerceFieldValue(fields[k]);
+    }
   }
   return undefined;
 }
