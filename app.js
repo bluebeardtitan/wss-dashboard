@@ -3266,7 +3266,38 @@ function makeJumpBtn(dir, scrollEl, contextLabel, edge) {
   return btn;
 }
 
-// Modal jump buttons — a hop pair (80% per click, hold to scroll) plus an
+// Leather flap: every scroll control in a context lives on one strap docked
+// at the right edge — folded by default, pulled open from the tab.
+function makeScrollFlap(buttons) {
+  const flap = document.createElement('div');
+  flap.className = 'scroll-flap';
+  const tab = document.createElement('button');
+  tab.type = 'button';
+  tab.className = 'scroll-flap-tab';
+  tab.setAttribute('aria-expanded', 'false');
+  const chev = document.createElement('span');
+  chev.className = 'flap-chev';
+  chev.textContent = '◂';
+  chev.setAttribute('aria-hidden', 'true');
+  const lab = document.createElement('span');
+  lab.className = 'flap-label';
+  lab.textContent = 'Jump';
+  tab.appendChild(chev);
+  tab.appendChild(lab);
+  const panel = document.createElement('div');
+  panel.className = 'scroll-flap-panel';
+  buttons.forEach(b => panel.appendChild(b));
+  tab.addEventListener('click', () => {
+    const open = flap.classList.toggle('open');
+    tab.setAttribute('aria-expanded', String(open));
+    tab.title = open ? 'Hide jump controls' : 'Show jump controls';
+  });
+  flap.appendChild(panel);
+  flap.appendChild(tab);
+  return flap;
+}
+
+// Modal jump flaps — a hop pair (80% per click, hold to scroll) plus an
 // edge pair that lands exactly at the top/bottom in one click.
 const MODAL_LABELS = {
   schemeModal: 'form',
@@ -3281,35 +3312,30 @@ Object.keys(MODAL_LABELS).forEach(id => {
   if (!modalEl) return;
   const label = MODAL_LABELS[id];
   initScrollGlow(modalEl);
-  overlay.appendChild(makeJumpBtn('top', modalEl, label));
-  overlay.appendChild(makeJumpBtn('bottom', modalEl, label));
-  overlay.appendChild(makeJumpBtn('top', modalEl, label, true));
-  overlay.appendChild(makeJumpBtn('bottom', modalEl, label, true));
+  overlay.appendChild(makeScrollFlap([
+    makeJumpBtn('top', modalEl, label, true),
+    makeJumpBtn('top', modalEl, label),
+    makeJumpBtn('bottom', modalEl, label),
+    makeJumpBtn('bottom', modalEl, label, true)
+  ]));
 });
 
-// Page-level jump buttons
+// Page-level jump flap on the desk itself
 const pageScrollEl = document.documentElement;
 const pageUpBtn = makeJumpBtn('top', pageScrollEl, 'page');
-pageUpBtn.classList.add('scroll-jump-page');
 const pageDownBtn = makeJumpBtn('bottom', pageScrollEl, 'page');
-pageDownBtn.classList.add('scroll-jump-page');
 const pageTopEdgeBtn = makeJumpBtn('top', pageScrollEl, 'page', true);
-pageTopEdgeBtn.classList.add('scroll-jump-page');
 const pageBottomEdgeBtn = makeJumpBtn('bottom', pageScrollEl, 'page', true);
-pageBottomEdgeBtn.classList.add('scroll-jump-page');
-document.body.appendChild(pageUpBtn);
-document.body.appendChild(pageDownBtn);
-document.body.appendChild(pageTopEdgeBtn);
-document.body.appendChild(pageBottomEdgeBtn);
+const pageFlap = makeScrollFlap([pageTopEdgeBtn, pageUpBtn, pageDownBtn, pageBottomEdgeBtn]);
+document.body.appendChild(pageFlap);
 
-// Hide page jump buttons when any modal is open
+// Fold the page flap away whenever any modal is open
 ['schemeModal', 'pivotModal', 'detailModal', 'dataMenuModal', 'bulkModal'].forEach(id => {
   const el = document.getElementById(id);
   if (!el) return;
   const obs = new MutationObserver(() => {
     const open = !el.classList.contains('hidden');
-    [pageUpBtn, pageDownBtn, pageTopEdgeBtn, pageBottomEdgeBtn].forEach(b =>
-      b.classList.toggle('hidden', open));
+    pageFlap.classList.toggle('hidden', open);
   });
   obs.observe(el, { attributes: true, attributeFilter: ['class'] });
 });

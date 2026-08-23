@@ -1,27 +1,37 @@
 /* ========== CSS Variables / Theme ========== */
+/* Leather paper holder: the app mirrors the artifact it replaced — scheme
+   files carried in leather board holders. The desk is tan, records are
+   cream laid paper, chrome is saddle leather with a stitched edge, actions
+   are stamped in brass, warnings in oxblood. */
 :root {
-  --bg: #f0f2f5;
-  --surface: #ffffff;
-  --surface-hover: #f8f9fa;
-  --text: #1a1a2e;
-  --text-secondary: #555;
-  --border: #e0e0e0;
-  --primary: #2563eb;
-  --primary-hover: #1d4ed8;
-  --primary-light: #dbeafe;
-  --selected-wash: #e8f0fd;
-  --danger: #ef4444;
-  --danger-hover: #dc2626;
-  --shadow: 0 2px 12px rgba(0,0,0,0.08);
-  --shadow-lg: 0 8px 30px rgba(0,0,0,0.12);
+  --bg: #e4d4b6;
+  --surface: #fbf5e8;
+  --surface-hover: #f4ecda;
+  --text: #2b2115;
+  --text-secondary: #7a6851;
+  --border: #dccba4;
+  --primary: #8a5a2b;
+  --primary-hover: #71481f;
+  --primary-light: #efdfc4;
+  --selected-wash: #f2e5c9;
+  --danger: #a03b2a;
+  --danger-hover: #86301f;
+  --shadow: 0 2px 12px rgba(62,42,20,0.10);
+  --shadow-lg: 0 8px 30px rgba(62,42,20,0.16);
   --radius: 12px;
   --radius-sm: 8px;
   --transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  --scrollbar-glow: rgba(37, 99, 235, 0.4);
-  --roster-tint: #eff6ff;
-  --row-active: #f5f9ff;
-  --live: #d97706;
-  --live-tint: #fffbeb;
+  --scrollbar-glow: rgba(138, 90, 43, 0.45);
+  --roster-tint: #f6edd8;
+  --row-active: #faf3e2;
+  --live: #b45309;
+  --live-tint: #fff8e7;
+  /* Leather chrome (the holder itself) */
+  --band: #5f4126;
+  --band-deep: #4c3119;
+  --band-text: #f3e7ce;
+  --band-text-dim: #cdb48c;
+  --thread: #c99b5e;
 }
 
 /* ========== Global Scrollbar (hidden — replaced by Scroll Glow, see bottom of file) ========== */
@@ -37,24 +47,29 @@
 }
 
 [data-theme="dark"] {
-  --bg: #0f172a;
-  --surface: #1e293b;
-  --surface-hover: #334155;
-  --text: #e2e8f0;
-  --text-secondary: #94a3b8;
-  --border: #334155;
-  --primary: #3b82f6;
-  --primary-hover: #60a5fa;
-  --primary-light: #1e3a5f;
-  --selected-wash: #1d2d52;
-  --danger: #f87171;
-  --danger-hover: #ef4444;
-  --shadow: 0 2px 12px rgba(0,0,0,0.3);
-  --shadow-lg: 0 8px 30px rgba(0,0,0,0.4);
-  --roster-tint: #16273f;
-  --row-active: #203144;
-  --live: #f59e0b;
-  --live-tint: #2a2212;
+  --bg: #201710;
+  --surface: #2c2015;
+  --surface-hover: #3a2c1c;
+  --text: #efe2c8;
+  --text-secondary: #b39c77;
+  --border: #46351f;
+  --primary: #c89b5a;
+  --primary-hover: #ddb276;
+  --primary-light: #40301b;
+  --selected-wash: #3a2c18;
+  --danger: #e06a50;
+  --danger-hover: #c8543c;
+  --shadow: 0 2px 12px rgba(0,0,0,0.35);
+  --shadow-lg: 0 8px 30px rgba(0,0,0,0.5);
+  --roster-tint: #342617;
+  --row-active: #3d2e1b;
+  --live: #e8a13c;
+  --live-tint: #33261138;
+  --band: #3a2717;
+  --band-deep: #2b1c0f;
+  --band-text: #ecd9b4;
+  --band-text-dim: #a98d63;
+  --thread: #9a7443;
 }
 
 /* ========== Reset ========== */
@@ -72,20 +87,40 @@ body {
   transition: background var(--transition), color var(--transition);
 }
 
-/* ========== Header ========== */
+/* Display face: an engraved-serif register hand for titles and card names.
+   System serifs only — this app must work fully offline. */
+h1, h2, h3, .card-title {
+  font-family: Georgia, 'Palatino Linotype', 'Book Antiqua', 'Times New Roman', serif;
+  letter-spacing: 0.01em;
+}
+
+/* ========== Header — the leather band of the holder ========== */
 header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 16px 32px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  box-shadow: var(--shadow);
+  padding: 16px 32px 18px;
+  background: linear-gradient(180deg, var(--band), var(--band-deep));
+  border-bottom: none;
+  box-shadow: 0 2px 12px rgba(43,28,15,0.35);
   position: sticky;
   top: 0;
   z-index: 100;
   transition: background var(--transition), border var(--transition);
+}
+
+/* Stitched seam along the bottom edge of the band. */
+header::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 5px;
+  height: 1px;
+  background-image: repeating-linear-gradient(90deg, var(--thread) 0 7px, transparent 7px 14px);
+  opacity: 0.55;
+  pointer-events: none;
 }
 
 .header-left {
@@ -97,6 +132,29 @@ header {
 .header-left h1 {
   font-size: 1.4rem;
   white-space: nowrap;
+  color: var(--band-text);
+  text-shadow: 0 1px 0 rgba(0,0,0,0.45), 0 -1px 0 rgba(255,255,255,0.07);
+}
+
+/* Controls sitting in the band read as objects tucked into leather. */
+header .btn-secondary,
+header .btn-outline {
+  background: transparent;
+  border-color: var(--thread);
+  color: var(--band-text);
+}
+
+header .btn-secondary:hover {
+  background: rgba(255,255,255,0.08);
+  color: var(--band-text);
+}
+
+.theme-toggle {
+  background: transparent;
+}
+
+.theme-toggle:hover {
+  background: rgba(255,255,255,0.08);
 }
 
 .show-hidden-btn {
@@ -153,7 +211,8 @@ header {
   padding: 10px 76px 10px 40px;
   border: 2px solid var(--border);
   border-radius: 999px;
-  background: var(--bg);
+  /* A paper slip tucked into the leather band. */
+  background: var(--surface);
   color: var(--text);
   font-size: 0.95rem;
   outline: none;
@@ -172,7 +231,7 @@ header {
 
 .search-wrapper.search-invalid input:focus {
   border-color: var(--danger);
-  box-shadow: 0 0 0 3px rgba(239,68,68,0.15);
+  box-shadow: 0 0 0 3px rgba(160,59,42,0.15);
 }
 
 .search-icon {
@@ -822,8 +881,11 @@ header {
 
 .card {
   position: relative;
-  background: var(--surface);
-  border-radius: var(--radius);
+  /* A record slip: faint laid lines over cream stock. */
+  background:
+    repeating-linear-gradient(0deg, transparent 0 25px, rgba(138,90,43,0.05) 25px 26px),
+    var(--surface);
+  border-radius: 6px;
   box-shadow: var(--shadow);
   padding: 20px;
   border: 1px solid var(--border);
@@ -1101,7 +1163,8 @@ body.selection-mode .sel-marker {
 
 .modal {
   background: var(--surface);
-  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  border-radius: 8px;
   width: 90%;
   max-width: 540px;
   max-height: 85vh;
@@ -1118,7 +1181,8 @@ body.selection-mode .sel-marker {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20px 24px 0;
+  padding: 20px 24px 14px;
+  border-bottom: 1px dashed var(--thread);
 }
 
 .modal-header h2 {
@@ -2425,18 +2489,132 @@ tr.bulk-row-active td:not(.bulk-grid-scheme-col) {
   animation: scrollGlowPulse 2.2s ease-in-out infinite;
 }
 
-/* ========== Scroll Jump Buttons ========== */
-.scroll-jump {
+/* ========== Scroll Flap ========== */
+/* Every scroll control lives on one leather strap docked at the right edge
+   of its context — the page gets one fixed strap, each modal overlay its
+   own. Folded by default; pulling the tab slides the panel out of the
+   holder's edge. */
+.scroll-flap {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  /* Folded: the whole strap sits pushed into its edge — only the pull-tab
+     peeks out. Opening slides the strap out of the edge, tab leading. */
+  transform: translateY(-50%) translateX(calc(100% - 30px));
+  transition: transform 0.25s ease;
+  z-index: 220;
+  display: flex;
+  align-items: center;
+}
+
+.scroll-flap.open {
+  transform: translateY(-50%) translateX(0);
+}
+
+.modal-overlay .scroll-flap {
   position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 44px;
-  height: 44px;
+  z-index: 210;
+}
+
+.scroll-flap.hidden {
+  display: none;
+}
+
+.scroll-flap-tab {
+  order: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 30px;
+  padding: 14px 0 16px;
+  border: none;
+  border-radius: 10px 0 0 10px;
+  background: linear-gradient(180deg, var(--band), var(--band-deep));
+  color: var(--band-text);
+  cursor: pointer;
+  box-shadow: -2px 2px 8px rgba(43,28,15,0.35);
+  transition: background 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.scroll-flap-tab:hover {
+  background: var(--band);
+}
+
+.scroll-flap-tab:focus-visible,
+.scroll-jump:focus-visible {
+  outline: 2px solid var(--thread);
+  outline-offset: 2px;
+}
+
+.scroll-flap-tab .flap-chev {
+  font-size: 0.85rem;
+  line-height: 1;
+  transition: transform 0.25s ease;
+}
+
+.scroll-flap.open .flap-chev {
+  transform: rotate(180deg);
+}
+
+.scroll-flap-tab .flap-label {
+  writing-mode: vertical-rl;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+}
+
+.scroll-flap-panel {
+  order: 2;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 10px;
+  border-radius: 10px 0 0 10px;
+  background: linear-gradient(180deg, var(--band), var(--band-deep));
+  box-shadow: -3px 2px 12px rgba(43,28,15,0.4);
+  /* Hidden while folded so its buttons never take keyboard focus. */
+  visibility: hidden;
+  transition: visibility 0.25s;
+}
+
+/* Stitched seam along the panel's free edge. */
+.scroll-flap-panel::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background-image: repeating-linear-gradient(0deg, var(--thread) 0 7px, transparent 7px 14px);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.scroll-flap.open .scroll-flap-panel {
+  visibility: visible;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scroll-flap,
+  .scroll-flap-tab .flap-chev {
+    transition: none;
+  }
+}
+
+/* Jump buttons ride inside the panel: static circles in a column. */
+.scroll-jump {
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
-  border: 1.5px solid var(--border);
+  border: 1px solid transparent;
   background: var(--surface);
-  color: var(--text-secondary);
-  font-size: 1.3rem;
+  color: var(--primary);
+  font-size: 1.15rem;
   font-weight: 500;
   cursor: pointer;
   transition: opacity 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
@@ -2445,8 +2623,9 @@ tr.bulk-row-active td:not(.bulk-grid-scheme-col) {
   align-items: center;
   justify-content: center;
   line-height: 1;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
-  opacity: 0.75;
+  box-shadow: 0 1px 4px rgba(43,28,15,0.18);
+  opacity: 0.85;
+  flex-shrink: 0;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
 }
@@ -2454,28 +2633,23 @@ tr.bulk-row-active td:not(.bulk-grid-scheme-col) {
 .scroll-jump:hover {
   opacity: 1;
   background: var(--primary-light);
-  color: var(--primary);
+  color: var(--primary-hover);
   border-color: var(--primary);
-  box-shadow: 0 2px 10px rgba(37,99,235,0.2);
-}
-
-.scroll-jump:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 3px;
+  box-shadow: 0 2px 10px rgba(43,28,15,0.25);
 }
 
 .scroll-jump-active {
   opacity: 1;
   background: var(--primary-light);
-  color: var(--primary);
+  color: var(--primary-hover);
   border-color: var(--primary);
-  box-shadow: 0 0 0 4px var(--primary-light), 0 2px 10px rgba(37,99,235,0.2);
+  box-shadow: 0 0 0 4px var(--primary-light), 0 2px 10px rgba(43,28,15,0.25);
   animation: scrollJumpPulse 0.6s ease-in-out infinite;
 }
 
 @keyframes scrollJumpPulse {
-  0%, 100% { box-shadow: 0 0 0 4px var(--primary-light), 0 2px 10px rgba(37,99,235,0.2); }
-  50% { box-shadow: 0 0 0 6px var(--primary-light), 0 2px 14px rgba(37,99,235,0.3); }
+  0%, 100% { box-shadow: 0 0 0 4px var(--primary-light), 0 2px 10px rgba(43,28,15,0.25); }
+  50% { box-shadow: 0 0 0 6px var(--primary-light), 0 2px 14px rgba(43,28,15,0.35); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2484,20 +2658,12 @@ tr.bulk-row-active td:not(.bulk-grid-scheme-col) {
   }
 }
 
-.scroll-jump-top {
-  top: 8px;
-}
-
-.scroll-jump-bottom {
-  bottom: 8px;
-}
-
-/* Edge variants: solid blue + a boundary bar above (top) or below (bottom)
+/* Edge variants: solid brass + a boundary bar above (top) or below (bottom)
    the arrow. The bar reads as "the limit this button goes to", setting them
    apart from the neighbouring 80%-hop arrows without new glyphs. */
 .scroll-jump-edge {
   flex-direction: column;
-  font-size: 1.05rem;
+  font-size: 1rem;
   background: var(--primary);
   border-color: var(--primary);
   color: #fff;
@@ -2505,16 +2671,16 @@ tr.bulk-row-active td:not(.bulk-grid-scheme-col) {
 }
 
 .scroll-jump-edge:hover {
-  background: var(--primary);
+  background: var(--primary-hover);
   color: #fff;
   opacity: 1;
-  box-shadow: 0 2px 10px rgba(37,99,235,0.35);
+  box-shadow: 0 2px 10px rgba(43,28,15,0.35);
 }
 
 .scroll-jump-edge.scroll-jump-top::before,
 .scroll-jump-edge.scroll-jump-bottom::after {
   content: '';
-  width: 16px;
+  width: 14px;
   height: 2px;
   border-radius: 2px;
   background: currentColor;
@@ -2528,51 +2694,30 @@ tr.bulk-row-active td:not(.bulk-grid-scheme-col) {
   margin-top: 1px;
 }
 
-/* Modal edge pair sits beside its hop sibling; page rail stacks a second
-   column inside the fixed right edge. */
-.scroll-jump-edge {
-  transform: translateX(calc(-50% + 52px));
-}
-
-.scroll-jump-page {
-  position: fixed;
-  right: 12px;
-  left: auto;
-  transform: none;
-}
-
-.scroll-jump-page.scroll-jump-top {
-  top: 60px;
-}
-
-.scroll-jump-page.scroll-jump-bottom {
-  bottom: 8px;
-}
-
-.scroll-jump-page.scroll-jump-edge {
-  right: 64px;
-}
-
 /* ========== Scheme Links ========== */
 /* Links get their own water-cyan identity, distinct from the blue primary:
    they are the connective tissue of the network, so they read as nodes on a
    line rather than as buttons or tags. */
 
+/* Links keep their own identity — verdigris, the patina that grows on brass
+   fittings: still unmistakably "connection", but native to the leather
+   holder rather than borrowed from a screen palette. */
+
 :root {
-  --link: #0e7490;
-  --link-strong: #155e75;
-  --link-tint: #e2f4f6;
-  --link-tint-hover: #cdeef2;
-  --link-border: #9fdce4;
+  --link: #2e6e62;
+  --link-strong: #1d5348;
+  --link-tint: #e3efe9;
+  --link-tint-hover: #d2e7dd;
+  --link-border: #a7cbbd;
   --link-rail: linear-gradient(to bottom, var(--link), var(--link-border));
 }
 
 [data-theme="dark"] {
-  --link: #53dcee;
-  --link-strong: #8ae9f5;
-  --link-tint: #0e333c;
-  --link-tint-hover: #14495a;
-  --link-border: #155e75;
+  --link: #7fc4ae;
+  --link-strong: #a5d8c6;
+  --link-tint: #1f332b;
+  --link-tint-hover: #2a453a;
+  --link-border: #3f5c50;
   --link-rail: linear-gradient(to bottom, var(--link), var(--link-border));
 }
 
