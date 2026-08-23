@@ -892,6 +892,7 @@ tr.bulk-row-active td:not(.bulk-grid-scheme-col) {
 
 .dynamic-field-row input {
   flex: 1;
+  min-width: 0;
   padding: 8px 10px;
   border: 2px solid var(--border);
   border-radius: var(--radius-sm);
@@ -2154,6 +2155,32 @@ button.link-chip:hover {
   border-color: var(--primary);
 }
 
+/* Link values are unbounded (one scheme can feed many others), so a link
+   row cannot share one line between label and editor the way ordinary
+   fields do: at half width even a modest set of chips wraps into a skinny
+   tower and starves the entry input. Instead the label keeps the first
+   line and the chip editor takes a full-width second line — whatever the
+   value's size, it gets the whole modal to spread across. Bulk-modal link
+   rows define names only and have no editor, so they keep the single-line
+   layout. */
+.dynamic-field-row.link-row:has(.link-editor) {
+  flex-wrap: wrap;
+}
+
+.dynamic-field-row.link-row:has(.link-editor) .field-key-input {
+  order: 1;
+  flex: 1 1 calc(100% - 64px); /* clear handle + remove button + gaps */
+}
+
+.dynamic-field-row.link-row:has(.link-editor) .remove-field {
+  order: 2;
+}
+
+.dynamic-field-row.link-row:has(.link-editor) .link-editor {
+  order: 3;
+  flex: 1 1 100%;
+}
+
 .link-chip-edit {
   padding: 1px 4px 1px 7px;
   font-size: 0.75rem;
@@ -2168,8 +2195,8 @@ button.link-chip:hover {
 }
 
 .dynamic-field-row .link-entry {
-  flex: 1;
-  min-width: 90px;
+  flex: 1 1 160px;
+  min-width: 160px;
   padding: 4px 6px;
   border: none;
   border-radius: 0;
