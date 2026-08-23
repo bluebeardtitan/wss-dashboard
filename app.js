@@ -3205,13 +3205,16 @@ function initScrollGlow(el, threshold = 4) {
   return update;
 }
 
-// Jump button factory: click jumps ~80% page, hold for continuous scroll
-function makeJumpBtn(dir, scrollEl, contextLabel) {
+// Jump button factory. Default flavour hops ~80% of the viewport per click
+// (hold to scroll continuously); edge=true turns the button into an absolute
+// jump that lands exactly at the top or bottom in one click.
+function makeJumpBtn(dir, scrollEl, contextLabel, edge) {
   const btn = document.createElement('button');
-  btn.className = 'scroll-jump scroll-jump-' + dir;
+  btn.className = 'scroll-jump scroll-jump-' + dir + (edge ? ' scroll-jump-edge' : '');
   btn.textContent = dir === 'top' ? '↑' : '↓';
-  btn.title = dir === 'top' ? 'Scroll to top' : 'Scroll to bottom';
-  btn.setAttribute('aria-label', (dir === 'top' ? 'Scroll to top' : 'Scroll to bottom') + ' of ' + contextLabel);
+  const action = edge ? 'Jump to ' + (dir === 'top' ? 'top' : 'bottom') : (dir === 'top' ? 'Scroll to top' : 'Scroll to bottom');
+  btn.title = action;
+  btn.setAttribute('aria-label', action + ' of ' + contextLabel);
 
   const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const scrollBehavior = prefersReduced ? 'instant' : 'smooth';
@@ -3222,8 +3225,18 @@ function makeJumpBtn(dir, scrollEl, contextLabel) {
   const SCROLL_STEP = 30;
 
   function doScroll() {
+    if (edge) {
+      scrollEl.scrollTo({ top: dir === 'top' ? 0 : scrollEl.scrollHeight, behavior: scrollBehavior });
+      return;
+    }
     if (dir === 'top') scrollEl.scrollBy({ top: -scrollEl.clientHeight * 0.8, behavior: scrollBehavior });
     else scrollEl.scrollBy({ top: scrollEl.clientHeight * 0.8, behavior: scrollBehavior });
+  }
+
+  // Holding an absolute jump has no meaning — one click is the whole trip.
+  if (edge) {
+    btn.addEventListener('click', doScroll);
+    return btn;
   }
 
   function startHold() {
@@ -3253,14 +3266,25 @@ function makeJumpBtn(dir, scrollEl, contextLabel) {
   return btn;
 }
 
-// Modal jump buttons
-['schemeModal', 'pivotModal', 'detailModal', 'dataMenuModal', 'bulkModal'].forEach(id => {
+// Modal jump buttons — a hop pair (80% per click, hold to scroll) plus an
+// edge pair that lands exactly at the top/bottom in one click.
+const MODAL_LABELS = {
+  schemeModal: 'form',
+  pivotModal: 'table',
+  detailModal: 'details',
+  dataMenuModal: 'data menu',
+  bulkModal: 'bulk editor'
+};
+Object.keys(MODAL_LABELS).forEach(id => {
   const overlay = document.getElementById(id);
   const modalEl = overlay && overlay.querySelector('.modal');
   if (!modalEl) return;
+  const label = MODAL_LABELS[id];
   initScrollGlow(modalEl);
-  overlay.appendChild(makeJumpBtn('top', modalEl, id === 'schemeModal' ? 'form' : id === 'pivotModal' ? 'table' : id === 'detailModal' ? 'details' : id === 'dataMenuModal' ? 'data menu' : 'bulk editor'));
-  overlay.appendChild(makeJumpBtn('bottom', modalEl, id === 'schemeModal' ? 'form' : id === 'pivotModal' ? 'table' : id === 'detailModal' ? 'details' : id === 'dataMenuModal' ? 'data menu' : 'bulk editor'));
+  overlay.appendChild(makeJumpBtn('top', modalEl, label));
+  overlay.appendChild(makeJumpBtn('bottom', modalEl, label));
+  overlay.appendChild(makeJumpBtn('top', modalEl, label, true));
+  overlay.appendChild(makeJumpBtn('bottom', modalEl, label, true));
 });
 
 // Page-level jump buttons
@@ -3269,8 +3293,14 @@ const pageUpBtn = makeJumpBtn('top', pageScrollEl, 'page');
 pageUpBtn.classList.add('scroll-jump-page');
 const pageDownBtn = makeJumpBtn('bottom', pageScrollEl, 'page');
 pageDownBtn.classList.add('scroll-jump-page');
+const pageTopEdgeBtn = makeJumpBtn('top', pageScrollEl, 'page', true);
+pageTopEdgeBtn.classList.add('scroll-jump-page');
+const pageBottomEdgeBtn = makeJumpBtn('bottom', pageScrollEl, 'page', true);
+pageBottomEdgeBtn.classList.add('scroll-jump-page');
 document.body.appendChild(pageUpBtn);
 document.body.appendChild(pageDownBtn);
+document.body.appendChild(pageTopEdgeBtn);
+document.body.appendChild(pageBottomEdgeBtn);
 
 // Hide page jump buttons when any modal is open
 ['schemeModal', 'pivotModal', 'detailModal', 'dataMenuModal', 'bulkModal'].forEach(id => {
@@ -3278,8 +3308,8 @@ document.body.appendChild(pageDownBtn);
   if (!el) return;
   const obs = new MutationObserver(() => {
     const open = !el.classList.contains('hidden');
-    pageUpBtn.classList.toggle('hidden', open);
-    pageDownBtn.classList.toggle('hidden', open);
+    [pageUpBtn, pageDownBtn, pageTopEdgeBtn, pageBottomEdgeBtn].forEach(b =>
+      b.classList.toggle('hidden', open));
   });
   obs.observe(el, { attributes: true, attributeFilter: ['class'] });
 });
