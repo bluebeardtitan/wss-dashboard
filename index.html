@@ -13,10 +13,20 @@
       <h1>💧 Water Supply Schemes</h1>
     </div>
     <div class="header-center">
-      <div class="search-wrapper" id="searchWrapper">
-        <label for="searchInput" class="sr-only">Search cards</label>
-        <input type="text" id="searchInput" placeholder="Search cards..." title='Logical search: field:"Demand(MLD)">400 and field:"No. of Villages"<2 — also supports == != >= <= ~= (regex), and/or/not, name' />
-        <span class="search-icon">🔍</span>
+      <div class="search-shell">
+        <div class="search-wrapper" id="searchWrapper">
+          <label for="searchInput" class="sr-only">Search cards</label>
+          <input type="text" id="searchInput" placeholder="Search cards…" autocomplete="off" spellcheck="false"
+                 role="combobox" aria-expanded="false" aria-controls="searchSuggest" aria-autocomplete="list" />
+          <span class="search-icon" aria-hidden="true">🔍</span>
+          <div class="search-tools">
+            <span class="search-mode off" id="searchModeChip" aria-hidden="true">ƒx</span>
+            <button class="search-clear hidden" id="searchClearBtn" title="Clear search" aria-label="Clear search">&times;</button>
+            <button class="search-help-btn" id="searchHelpBtn" title="Search syntax reference" aria-label="Search syntax reference" aria-expanded="false">ƒx?</button>
+          </div>
+        </div>
+        <div class="search-suggest hidden" id="searchSuggest" role="listbox" aria-label="Search suggestions"></div>
+        <div class="search-help-panel hidden" id="searchHelpPanel" aria-label="Search syntax reference"></div>
       </div>
     </div>
     <div class="header-right">

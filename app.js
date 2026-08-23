@@ -372,8 +372,14 @@ function updatePendingBar() {
 function render() {
   const visibleSchemes = schemes.filter(s => showHidden ? true : !s.hidden);
   const filtered = visibleSchemes.filter(s => schemeMatchesQuery(getEffective(s.id)));
-  const searchInvalid = !!(searchQuery.trim() && compileSearchQuery(searchQuery.trim())?.invalid);
+  const searchTrimmed = searchQuery.trim();
+  const searchCompiled = searchTrimmed ? compileSearchQuery(searchTrimmed) : null;
+  const searchInvalid = !!(searchCompiled && searchCompiled.invalid);
+  const searchIsExpr = !!(searchCompiled && !searchCompiled.invalid);
   searchWrapper.classList.toggle('search-invalid', searchInvalid);
+  searchWrapper.classList.toggle('search-is-expr', searchIsExpr);
+  updateSearchModeChip(searchInvalid, searchIsExpr);
+  invalidateSearchSchema();
 
   const hiddenCount = schemes.filter(s => s.hidden).length;
   showHiddenCount.textContent = hiddenCount;
@@ -1502,6 +1508,549 @@ function schemeMatchesQuery(e) {
     );
 }
 
+// ========== Search Assist ==========
+// The expression language is only useful if it can be discovered. Three
+// affordances hang off the search bar: a schema-live suggestion dropdown
+// (fields → operators → sample values, all from the user's own data), a
+// mode lamp stating whether the query is plain text or a compiled
+// expression, and an ƒx reference panel that mirrors SEARCH.md. Inserted
+// values follow the documented typing rules: numeric-looking literals go
+// bare so `in (11045)` matches numbers, everything else is quoted.
+const searchClearBtn = document.getElementById('searchClearBtn');
+const searchModeChip = document.getElementById('searchModeChip');
+const searchHelpBtn = document.getElementById('searchHelpBtn');
+const searchSuggest = document.getElementById('searchSuggest');
+const searchHelpPanel = document.getElementById('searchHelpPanel');
+
+function updateSearchModeChip(invalid, isExpr) {
+  if (!searchModeChip) return;
+  searchModeChip.textContent = invalid ? '!' : 'ƒx';
+  searchModeChip.classList.toggle('off', !invalid && !isExpr);
+}
+
+// ---------- Live schema ----------
+let searchSchemaCache = null;
+
+function invalidateSearchSchema() { searchSchemaCache = null; }
+
+function getSearchSchema() {
+  if (searchSchemaCache) return searchSchemaCache;
+  const map = new Map();
+  const bump = (name, val) => {
+    let rec = map.get(name);
+    if (!rec) { rec = { count: 0, freq: new Map(), samples: [] }; map.set(name, rec); }
+    rec.count++;
+    if (val !== undefined && val !== null && String(val).trim() !== '') {
+      const s = String(val);
+      rec.freq.set(s, (rec.freq.get(s) || 0) + 1);
+    }
+  };
+  schemes.forEach(s => {
+    if (!showHidden && s.hidden) return;
+    const e = getEffective(s.id);
+    Object.entries(e.fields || {}).forEach(([k, v]) =>
+      bump(isTagKey(k) ? tagLabel(k) : k, v));
+  });
+  map.set('name', { count: schemes.length, freq: new Map(), samples: [], pseudoName: true });
+  map.forEach(rec => {
+    rec.samples = [...rec.freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(e2 => e2[0]);
+    delete rec.freq;
+  });
+  searchSchemaCache = map;
+  return map;
+}
+
+function truncateMeta(s, n) {
+  s = String(s);
+  return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+
+function formatSampleLiteral(s) {
+  const t = String(s).trim();
+  if (t !== '' && Number.isFinite(Number(t))) return t;
+  return '"' + String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+}
+
+// ---------- Caret context ----------
+// Works on the text left of the caret to answer: is the user picking a
+// field name, an operator, or a value — and for which field?
+function resolveLeftFieldRef(str, schema) {
+  str = str.replace(/\s+$/, '');
+  let m = str.match(/\bfield\s*:\s*(?:"([^"]*)"|'([^']*)')$/i);
+  if (m) return m[1] !== undefined ? m[1] : m[2];
+  m = str.match(/([A-Za-z_][A-Za-z0-9_]*)$/);
+  if (m) {
+    const tok = m[1];
+    if (tok.toLowerCase() === 'name' || schema.has(tok) ||
+        [...schema.keys()].some(k => k.toLowerCase() === tok.toLowerCase())) return tok;
+  }
+  return null;
+}
+
+function getAssistContext(text, caret) {
+  const left = text.slice(0, caret);
+  const schema = () => getSearchSchema();
+
+  // Locate the last comparison operator once.
+  const opRe = /(==|!=|>=|<=|~=|>|<)/g;
+  let last = null, om;
+  while ((om = opRe.exec(left))) last = om;
+
+  // An unterminated string literal sits before the caret. Whose? Quote
+  // parity tells us reliably whether a literal is open (quotes in this
+  // language only ever pair up as literal delimiters).
+  const openDq = ((left.match(/"/g) || []).length % 2) === 1;
+  const openSq = ((left.match(/'/g) || []).length % 2) === 1;
+  if (openDq || openSq) {
+    const q = openDq ? '"' : "'";
+    const qIdx = left.lastIndexOf(q);
+    const typed = left.slice(qIdx + 1);
+    const beforeStr = left.slice(0, qIdx);
+    // Opened by field: → picking a field name.
+    if (/\bfield\s*:\s*$/i.test(beforeStr)) {
+      return { type: 'field', start: caret - typed.length, typed, inString: true, quoteChar: q };
+    }
+    // Opened by a comparison operator → picking a value. Regex patterns
+    // stay quiet: free-typing a pattern is not value picking.
+    const opIsEq = last && last[0] !== '~=' && beforeStr.trimEnd().endsWith(last[0]);
+    if (opIsEq) {
+      const ref = resolveLeftFieldRef(left.slice(0, last.index), schema());
+      if (ref) return { type: 'value', ref, start: caret - typed.length, typed, inString: true, quoteChar: q };
+    }
+    return null;
+  }
+
+  const trimEnd = left.replace(/\s+$/, '');
+
+  // A closed field reference just ended → operator comes next.
+  if (/\bfield\s*:\s*(?:"[^"]*"|'[^']*')$/i.test(trimEnd)) {
+    return { type: 'operator', start: caret, typed: '' };
+  }
+
+  // A bare word token sits before the caret.
+  let m = trimEnd.match(/([A-Za-z_][A-Za-z0-9_]*)$/);
+  if (m) {
+    const tok = m[1];
+    const start = trimEnd.length - tok.length;
+    const before = trimEnd.slice(0, start);
+    const tokenComplete = left.length > trimEnd.length; // caret sits after whitespace
+    if (/(==|!=|>=|<=|~=|>|<|\(|,)$/.test(before)) {
+      const ref = resolveLeftFieldRef(before.replace(/(?:==|!=|>=|<=|~=|>|<)\s*$/, ''), schema());
+      if (ref) return { type: 'value', ref, start, typed: tok };
+    } else {
+      // A completed field name followed by a space expects an operator;
+      // a half-typed word filters the same list.
+      const ref = tokenComplete
+        ? resolveLeftFieldRef(trimEnd, schema())
+        : resolveLeftFieldRef(before, schema());
+      if (ref) return { type: 'operator', start, typed: tokenComplete ? '' : tok };
+    }
+    return { type: 'keyword', start, typed: tok };
+  }
+
+  // After a comparison operator → picking a bare (unquoted) value.
+  if (last) {
+    const afterOp = left.slice(last.index + last[0].length);
+    const vm = afterOp.match(/([A-Za-z0-9_.]+)$/);
+    if (vm) {
+      const ref = resolveLeftFieldRef(left.slice(0, last.index), schema());
+      if (ref) return { type: 'value', ref, start: caret - vm[1].length, typed: vm[1] };
+    }
+  }
+  return null;
+}
+
+// ---------- Suggestion builders ----------
+const EXPR_KEYWORDS = ['and', 'or', 'not', 'in', 'if', 'then', 'else', 'mod', 'true', 'false'];
+const EXPR_FUNCTIONS = ['abs', 'ceil', 'floor', 'log', 'log2', 'log10', 'max', 'min', 'round', 'sqrt', 'exists', 'empty'];
+const EXPR_OPERATORS = [
+  { t: '==', d: 'equals (exact)' },
+  { t: '!=', d: 'not equals' },
+  { t: '>', d: 'greater than' },
+  { t: '>=', d: 'greater or equal' },
+  { t: '<', d: 'less than' },
+  { t: '<=', d: 'less or equal' },
+  { t: '~=', d: 'matches regex' },
+  { t: 'in', d: 'any of ( … )' }
+];
+
+function rankByTyped(entries, typed) {
+  const tl = typed.toLowerCase();
+  const scored = entries.map(e => {
+    const nl = String(e.name).toLowerCase();
+    const tier = tl && nl.startsWith(tl) ? 0 : (tl && nl.includes(tl) ? 1 : (tl ? 2 : 0));
+    return { ...e, tier };
+  });
+  scored.sort((a, b) => a.tier - b.tier || (b.weight || 0) - (a.weight || 0));
+  return scored.filter(e => e.tier < 2 || !tl).slice(0, 8);
+}
+
+function buildSuggestions(ctx) {
+  const schema = getSearchSchema();
+  if (ctx.type === 'field') {
+    const entries = [...schema.entries()]
+      .map(([name, r]) => ({ name, weight: r.count }))
+      .filter(e => e.name.toLowerCase().includes(ctx.typed.toLowerCase()));
+    const ranked = rankByTyped(entries, ctx.typed).map(e => ({
+      glyph: '▸',
+      name: e.name,
+      meta: e.name === 'name' ? `${e.weight} cards` :
+        (getSearchSchema().get(e.name).samples[0] !== undefined ?
+          `e.g. ${truncateMeta(getSearchSchema().get(e.name).samples[0], 16)}` : `${e.weight} cards`),
+      insert: 'field:"' + e.name.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"',
+      inner: e.name
+    }));
+    return [{ label: 'Fields', items: ranked }];
+  }
+  if (ctx.type === 'operator') {
+    const items = rankByTyped(EXPR_OPERATORS.map(o => ({ name: o.t, desc: o.d })), ctx.typed)
+      .map(o => ({ glyph: '=', name: o.name, meta: o.desc, insert: o.name + ' ' }));
+    return [{ label: 'Operators', items }];
+  }
+  if (ctx.type === 'value') {
+    const rec = schema.get(ctx.ref);
+    if (!rec || rec.pseudoName) return [];
+    const items = rec.samples
+      .filter(s => !ctx.typed || formatSampleLiteral(s).toLowerCase().includes(ctx.typed.toLowerCase()))
+      .slice(0, 8)
+      .map(s => ({
+        glyph: '"',
+        name: truncateMeta(s, 26),
+        meta: rec.count + ' cards',
+        insert: formatSampleLiteral(s),
+        // Inside an open string literal only the content goes in — the
+        // quotes are already on the page.
+        inner: String(s).replace(/"/g, '\\"')
+      }));
+    return items.length ? [{ label: `Values of ${ctx.ref}`, items }] : [];
+  }
+  if (ctx.type === 'keyword') {
+    const groups = [];
+    const fieldEntries = [...schema.entries()].map(([name, r]) => ({ name, weight: r.count }));
+    const fields = rankByTyped(fieldEntries, ctx.typed).map(e => ({
+      glyph: '▸', name: e.name,
+      meta: e.name === 'name' ? 'card name' : 'field',
+      insert: 'field:"' + e.name.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"',
+      inner: e.name
+    })).filter(x => x.name.toLowerCase().includes(ctx.typed.toLowerCase()));
+    if (fields.length) groups.push({ label: 'Fields', items: fields });
+
+    const fns = EXPR_FUNCTIONS.filter(f => f.startsWith(ctx.typed.toLowerCase())).map(f => ({
+      glyph: 'ƒ', name: f,
+      meta: (f === 'empty' || f === 'exists') ? 'check blank / present' : 'function',
+      insert: (f === 'empty' || f === 'exists') ? `${f}(field:"")` : `${f}()`,
+      caretIn: (f === 'empty' || f === 'exists') ? f.length + 8 : `${f}()`.length - 1
+    }));
+    if (fns.length) groups.push({ label: 'Functions', items: fns });
+
+    const kws = EXPR_KEYWORDS.filter(k => k.startsWith(ctx.typed.toLowerCase())).map(k => ({
+      glyph: '·', name: k, meta: 'keyword',
+      insert: (k === 'not') ? 'not (' : k === 'true' || k === 'false' ? k : k + ' '
+    }));
+    if (kws.length) groups.push({ label: 'Keywords', items: kws });
+    return groups;
+  }
+  return [];
+}
+
+const STARTER_EXAMPLES = [
+  { q: 'Status == "Completed"', d: 'exact value' },
+  { q: 'field:"Demand(MLD)" > 400', d: 'numeric compare' },
+  { q: 'not empty(field:"Notes")', d: 'has notes' }
+];
+
+function buildEmptyFocusSuggestions() {
+  return [{
+    label: 'Try an expression',
+    items: STARTER_EXAMPLES.map(ex => ({
+      glyph: '✦', name: ex.q, meta: ex.d, insert: ex.q, replaceAll: true
+    }))
+  }];
+}
+
+// ---------- Dropdown rendering & keyboard ----------
+let suggestItems = [];
+let suggestActive = -1;
+let suggestOpen = false;
+
+function hideSuggest() {
+  suggestOpen = false;
+  suggestActive = -1;
+  searchSuggest.classList.add('hidden');
+  searchInput.setAttribute('aria-expanded', 'false');
+  searchInput.removeAttribute('aria-activedescendant');
+}
+
+function renderSuggest(groups) {
+  suggestItems = groups.flatMap(g => g.items);
+  if (!suggestItems.length) { hideSuggest(); return; }
+  suggestActive = -1;
+  let html = '';
+  let i = 0;
+  groups.forEach(g => {
+    html += `<div class="ss-group-label">${esc(g.label)}</div>`;
+    html += g.items.map(it => {
+      const id = `ss-opt-${i}`;
+      const metaHtml = it.meta ? `<span class="ss-meta">${esc(it.meta)}</span>` : '';
+      const row = `<button type="button" tabindex="-1" role="option" class="ss-item" data-i="${i}" id="${id}">` +
+        `<span class="ss-glyph" aria-hidden="true">${esc(it.glyph)}</span>` +
+        `<span class="ss-name">${esc(it.name)}</span>${metaHtml}</button>`;
+      i++;
+      return row;
+    }).join('');
+  });
+  searchSuggest.innerHTML = html;
+  searchSuggest.classList.remove('hidden');
+  if (!searchSuggest._glowInit) { initScrollGlow(searchSuggest); searchSuggest._glowInit = true; }
+  suggestOpen = true;
+  searchInput.setAttribute('aria-expanded', 'true');
+}
+
+function applySuggestItem(item) {
+  if (item.replaceAll) {
+    searchInput.value = item.insert;
+  } else {
+    const v = searchInput.value;
+    const selStart = searchInput.selectionStart ?? v.length;
+    const selEnd = searchInput.selectionEnd ?? v.length;
+    const ctx = getAssistContext(v, selStart);
+    // Inside an open field:"…" or "…" literal the wrapper already exists
+    // on the page: only the content goes between the quotes, and the
+    // closing quote is added — unless it's already there to our right.
+    let text = item.insert;
+    if (ctx && item.inner !== undefined && ((ctx.type === 'field') || (ctx.type === 'value' && ctx.inString))) {
+      const q = ctx.quoteChar || '"';
+      text = item.inner;
+      if (v.charAt(Math.max(selEnd, selStart)) !== q) text += q;
+    }
+    const start = ctx ? Math.min(ctx.start ?? selStart, selStart) : selStart;
+    searchInput.value = v.slice(0, start) + text + v.slice(Math.max(selEnd, selStart));
+    let pos = start + text.length;
+    if (item.caretIn !== undefined && text === item.insert) pos = start + item.caretIn;
+    else if (ctx && ctx.inString && v.charAt(Math.max(selEnd, selStart)) === '"') pos = start + item.inner.length + 1;
+    searchInput.setSelectionRange(pos, pos);
+  }
+  hideSuggest();
+  searchInput.focus();
+  searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function moveSuggestActive(dir) {
+  if (!suggestOpen || !suggestItems.length) return;
+  const count = suggestItems.length;
+  suggestActive = dir > 0
+    ? (suggestActive + 1) % count
+    : (suggestActive <= 0 ? count - 1 : suggestActive - 1);
+  searchSuggest.querySelectorAll('.ss-item').forEach((el, idx) =>
+    el.classList.toggle('active', idx === suggestActive));
+  const el = searchSuggest.querySelector(`#ss-opt-${suggestActive}`);
+  if (el) {
+    el.scrollIntoView({ block: 'nearest' });
+    searchInput.setAttribute('aria-activedescendant', el.id);
+  }
+}
+
+searchSuggest.addEventListener('mousedown', e => {
+  const b = e.target.closest('.ss-item');
+  if (!b) return;
+  e.preventDefault(); // keep focus in the input
+  applySuggestItem(suggestItems[Number(b.dataset.i)]);
+});
+
+// ---------- Input wiring ----------
+function runAssist() {
+  const v = searchInput.value;
+  searchClearBtn.classList.toggle('hidden', v.length === 0);
+  if (!v.trim()) {
+    // Empty box: offer starting points instead of nothing.
+    if (document.activeElement === searchInput) {
+      renderSuggest(buildEmptyFocusSuggestions());
+    } else {
+      hideSuggest();
+    }
+    return;
+  }
+  const ctx = getAssistContext(v, searchInput.selectionStart ?? v.length);
+  if (!ctx) { hideSuggest(); return; }
+  const groups = buildSuggestions(ctx).filter(g => g.items.length);
+  if (!groups.length) { hideSuggest(); return; }
+  renderSuggest(groups);
+}
+
+searchInput.addEventListener('input', () => {
+  searchClearBtn.classList.toggle('hidden', searchInput.value.length === 0);
+  runAssist();
+});
+searchInput.addEventListener('focus', () => { if (!searchInput.value.trim()) runAssist(); });
+searchInput.addEventListener('blur', () => setTimeout(hideSuggest, 120));
+searchInput.addEventListener('keydown', e => {
+  if (suggestOpen) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); moveSuggestActive(1); return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); moveSuggestActive(-1); return; }
+    if ((e.key === 'Enter' || e.key === 'Tab') && suggestActive >= 0) {
+      e.preventDefault();
+      applySuggestItem(suggestItems[suggestActive]);
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation(); // dismiss the dropdown, not the app state
+      hideSuggest();
+      return;
+    }
+  }
+  if (e.key === 'Escape' && !searchHelpPanel.classList.contains('hidden')) {
+    e.preventDefault();
+    e.stopPropagation();
+    closeSearchHelp();
+  }
+});
+
+searchClearBtn.addEventListener('click', () => {
+  searchInput.value = '';
+  hideSuggest();
+  searchInput.focus();
+  searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+});
+
+// ---------- Reference panel (ƒx?) ----------
+function fieldChipsForHelp() {
+  const entries = [...getSearchSchema().entries()]
+    .filter(([n, r]) => !r.pseudoName)
+    .sort((a, b) => b[1].count - a[1].count);
+  const shown = entries.slice(0, 12);
+  const rest = entries.length - shown.length;
+  const chips = shown.map(([name, r]) =>
+    `<button type="button" class="sh-chip" data-insert="field:&quot;${escAttr(name.replace(/"/g, '\\"'))}&quot;">` +
+    `${esc(name)} <span class="sh-count">×${r.count}</span></button>`
+  ).join('');
+  const note = rest > 0 ? `<p class="sh-note">+${rest} more — they appear as you type.</p>` : '';
+  return chips + note;
+}
+
+const HELP_SECTIONS = [
+  {
+    title: 'Compare',
+    chips: [
+      { t: '== ', d: 'equals (exact case)' }, { t: '!= ', d: 'not equals' },
+      { t: '> ', d: 'numbers only' }, { t: '>= ', d: '' }, { t: '< ', d: '' }, { t: '<= ', d: '' },
+      { t: '~= ', d: 'regex test' }, { t: ' in ( )', d: 'any of a list' }
+    ]
+  },
+  {
+    title: 'Combine',
+    chips: [
+      { t: 'and ', d: '' }, { t: 'or ', d: '' }, { t: 'not ( )', d: 'negate — wrap comparisons' }
+    ]
+  },
+  {
+    title: 'Check values',
+    chips: [
+      { t: 'empty(field:"")', d: 'blank or missing', tpl: true },
+      { t: 'exists(field:"")', d: 'present', tpl: true },
+      { t: ' ~= ""', d: 'regex, e.g. ^WSS' }
+    ],
+    note: 'Blank fields read as missing — use empty(), not == "". Equality is exact: "Done" ≠ "done".'
+  }
+];
+
+const HELP_EXAMPLES = [
+  { q: 'Status == "Completed" or Status == "Commissioned"', d: 'either value' },
+  { q: 'field:"Demand(MLD)" > 400 and not empty(field:"Notes")', d: 'combine conditions' },
+  { q: 'field:"District" in ("North", "South")', d: 'list membership' },
+  { q: 'name ~= "^WSS"', d: 'regex on card name' },
+  { q: 'field:"Cost" / field:"Villages" > 50', d: 'arithmetic' },
+  { q: 'max(field:"Phase 1", field:"Phase 2") >= 3', d: 'functions' }
+];
+
+function buildHelpPanel() {
+  const sections = HELP_SECTIONS.map(s => `
+    <div class="sh-section">
+      <h4>${esc(s.title)}</h4>
+      <div class="sh-grid">${s.chips.map(c =>
+        `<button type="button" class="sh-chip" title="${escAttr(c.d)}"${c.tpl ? ' data-tpl="true"' : ` data-insert="${escAttr(c.t)}"`}>${esc(c.t)}</button>`
+      ).join('')}</div>
+      ${s.note ? `<p class="sh-note">${esc(s.note)}</p>` : ''}
+    </div>`).join('');
+  searchHelpPanel.innerHTML = `
+    <div class="sh-head">
+      <span class="sh-title">Query reference</span>
+      <kbd class="sh-kbd">Ctrl K</kbd>
+      <button class="sh-close" aria-label="Close reference">&times;</button>
+    </div>
+    <div class="sh-section">
+      <h4>Your fields <em>· click to insert</em></h4>
+      <div class="sh-grid" id="shFieldGrid">${fieldChipsForHelp()}</div>
+    </div>
+    ${sections}
+    <div class="sh-section">
+      <h4>Examples <em>· click to run</em></h4>
+      ${HELP_EXAMPLES.map(ex =>
+        `<button type="button" class="sh-example" data-example="${escAttr(ex.q)}"><code>${esc(ex.q)}</code><span>${esc(ex.d)}</span></button>`
+      ).join('')}
+    </div>`;
+  initScrollGlow(searchHelpPanel);
+}
+
+function openSearchHelp() {
+  if (searchHelpPanel.classList.contains('hidden')) buildHelpPanel();
+  document.getElementById('shFieldGrid').innerHTML = fieldChipsForHelp();
+  searchHelpPanel.classList.remove('hidden');
+  searchHelpBtn.classList.add('active');
+  searchHelpBtn.setAttribute('aria-expanded', 'true');
+  hideSuggest();
+}
+
+function closeSearchHelp() {
+  searchHelpPanel.classList.add('hidden');
+  searchHelpBtn.classList.remove('active');
+  searchHelpBtn.setAttribute('aria-expanded', 'false');
+}
+
+searchHelpBtn.addEventListener('click', () => {
+  if (searchHelpPanel.classList.contains('hidden')) openSearchHelp();
+  else closeSearchHelp();
+});
+
+searchHelpPanel.addEventListener('mousedown', e => {
+  const close = e.target.closest('.sh-close');
+  const chip = e.target.closest('.sh-chip[data-insert]');
+  const tpl = e.target.closest('.sh-chip[data-tpl]');
+  const example = e.target.closest('.sh-example[data-example]');
+  e.preventDefault(); // keep focus in the input while inserting
+  if (close) { closeSearchHelp(); return; }
+  if (tpl) {
+    const fn = tpl.textContent.trim().replace(/\(field:""\)$/, '');
+    insertIntoSearch(`${fn}(field:"")`, fn.length + 8);
+    return;
+  }
+  if (chip) { insertIntoSearch(chip.dataset.insert); return; }
+  if (example) {
+    searchInput.value = example.dataset.example;
+    searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    searchInput.focus();
+    closeSearchHelp();
+  }
+});
+
+function insertIntoSearch(text, caretIn) {
+  const v = searchInput.value;
+  const c = searchInput.selectionStart ?? v.length;
+  searchInput.value = v.slice(0, c) + text + v.slice(searchInput.selectionEnd ?? c);
+  const pos = c + (caretIn !== undefined ? caretIn : text.length);
+  searchInput.setSelectionRange(pos, pos);
+  searchInput.focus();
+  searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+// Close search popups when clicking anywhere outside the deck.
+document.addEventListener('click', e => {
+  if (!e.target.closest('.search-shell')) {
+    if (suggestOpen) hideSuggest();
+    if (!searchHelpPanel.classList.contains('hidden')) closeSearchHelp();
+  }
+});
+
 // ========== Bulk Operations ==========
 bulkSelectAllBtn.addEventListener('click', () => {
   // Respect the active search: only cards currently matching are selected.
@@ -2516,6 +3065,7 @@ document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
     e.preventDefault();
     searchInput.focus();
+    searchInput.select();
   }
   if (e.key === 'Escape') {
     if (!schemeModal.classList.contains('hidden')) closeModal();
@@ -2523,6 +3073,9 @@ document.addEventListener('keydown', e => {
     else if (!detailModal.classList.contains('hidden')) closeDetailModal();
     else if (!bulkModal.classList.contains('hidden')) closeBulkModal();
     else if (!dataMenuModal.classList.contains('hidden')) closeDataMenuModal();
+    // The reference panel is lighter than a modal: it yields before
+    // selection mode does, so Escape peels layers instead of nuking state.
+    else if (!searchHelpPanel.classList.contains('hidden')) closeSearchHelp();
     else if (selectionMode) exitSelectionMode();
   }
 });

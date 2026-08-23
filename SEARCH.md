@@ -2,6 +2,8 @@
 
 The search box matches either plain text or logical expressions. Type normally for text matching; switch to expression syntax when you need to filter on values.
 
+The **ƒx?** button next to the search box shows this reference with your live fields, and the box itself suggests field names, operators, and sample values as you type.
+
 ## Plain text
 
 Case-insensitive substring match against card names, field names, and field values. `pump` matches cards named Pump House and any card whose notes contain "pumping".
