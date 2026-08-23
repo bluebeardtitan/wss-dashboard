@@ -2304,8 +2304,10 @@ function oauthSignIn() {
     'redirect_uri': getRedirectUri(),
     'response_type': 'token',
     'scope': 'https://www.googleapis.com/auth/drive.file',
-    'include_granted_scopes': 'true',
-    'prompt': 'consent'
+    'include_granted_scopes': 'true'
+    // No `prompt`: an existing Google session with prior consent returns a
+    // token with no interaction (follows the browser's active account).
+    // Consent then appears only on genuine first use.
   };
 
   for (const p in params) {
@@ -2322,8 +2324,17 @@ function oauthSignIn() {
 
 function extractTokenFromHash() {
   const hash = window.location.hash;
-  if (!hash || !hash.includes('access_token')) return;
+  if (!hash) return;
   const params = new URLSearchParams(hash.substring(1));
+  if (params.get('error')) {
+    const why = params.get('error') === 'access_denied'
+      ? 'Drive sign-in cancelled'
+      : 'Drive sign-in failed: ' + params.get('error');
+    showToast(why);
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    return;
+  }
+  if (!hash.includes('access_token')) return;
   const token = params.get('access_token');
   const expiresIn = parseInt(params.get('expires_in') || '3600', 10);
   if (token) {
@@ -2343,8 +2354,18 @@ dataDriveConnect.addEventListener('click', () => {
 });
 
 function ensureDriveToken() {
-  if (!window._gdriveToken || Date.now() >= window._gdriveTokenExpiry) {
-    showToast('Not connected to Drive');
+  const expired = window._gdriveToken && Date.now() >= window._gdriveTokenExpiry;
+  if (!window._gdriveToken || expired) {
+    if (!expired) {
+      // Never connected (or explicitly disconnected): ask first.
+      showToast('Not connected to Drive');
+      openDataMenuModal();
+      return false;
+    }
+    // Token merely aged out (~1h implicit lifetime): reconnect directly.
+    // With no forced consent screen this is usually an instant bounce.
+    showToast('Reconnecting to Drive…');
+    oauthSignIn();
     return false;
   }
   return true;
