@@ -1506,6 +1506,29 @@ function isExprInvalid(q) {
   return !!(c && c.invalid);
 }
 
+// Text-mode grammar: term [term …] [| term [term …]]…
+// Whitespace-separated terms AND together; | separates OR groups, and AND
+// binds tighter (split on | first, then on spaces). Every term is a
+// case-insensitive substring across the card name, field keys and values.
+// Degenerate queries degrade gracefully: empty terms/groups are dropped, a
+// lone separator equals the bare term, an all-empty query matches all.
+function textTermMatches(term, e) {
+  return (e.name || '').toLowerCase().includes(term) ||
+    Object.entries(e.fields || {}).some(([k, v]) =>
+      k.toLowerCase().includes(term) ||
+      String(v).toLowerCase().includes(term)
+    );
+}
+
+function textQueryMatches(q, e) {
+  const groups = q.toLowerCase()
+    .split('|')
+    .map(g => g.split(/\s+/).filter(Boolean))
+    .filter(g => g.length);
+  if (!groups.length) return true;
+  return groups.some(terms => terms.every(t => textTermMatches(t, e)));
+}
+
 function schemeMatchesQuery(e) {
   if (searchMode === 'expr') {
     if (!exprFilter) return true;
@@ -1515,12 +1538,7 @@ function schemeMatchesQuery(e) {
   }
   const q = searchQuery.trim();
   if (!q) return true;
-  const lq = q.toLowerCase();
-  return (e.name || '').toLowerCase().includes(lq) ||
-    Object.entries(e.fields || {}).some(([k, v]) =>
-      k.toLowerCase().includes(lq) ||
-      String(v).toLowerCase().includes(lq)
-    );
+  return textQueryMatches(q, e);
 }
 
 // ========== Expression Filter UI ==========

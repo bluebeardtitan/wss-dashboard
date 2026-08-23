@@ -8,7 +8,20 @@ Search has two modes. **Text mode** matches plain text. **Expression mode** (ƒx
 
 ## Plain text
 
-Case-insensitive substring match against card names, field names, and field values. `pump` matches cards named Pump House and any card whose notes contain "pumping".
+Case-insensitive substring match against card names, field names, and field values.
+
+**Multiple terms:** spaces mean AND, `|` means OR — AND binds tighter:
+
+| Query | Meaning |
+| --- | --- |
+| `pump` | contains "pump" |
+| `pump north` | "pump" AND "north" |
+| `pump \| tank` | "pump" OR "tank" |
+| `pump north \| intake` | ("pump" AND "north") OR "intake" |
+
+Terms match anywhere — a term like `district` can hit a field's name rather than its value. Stray separators are ignored (`pump \|` equals `pump`), and an empty query shows everything.
+
+Text mode never compiles expressions: `done & wip` finds that literal text. For real filtering logic, switch to expression mode with the ƒx button.
 
 ## Expressions
 
