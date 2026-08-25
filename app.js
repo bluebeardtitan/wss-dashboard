@@ -2298,26 +2298,6 @@ bulkModalNext.addEventListener('click', () => {
     return;
   }
 
-  const affected = [];
-  for (const id of selectedIds) {
-    const e = getEffective(id);
-    if (!e || !e.fields) continue;
-    for (const k of fieldKeys) {
-      if (e.fields[k] !== undefined && e.fields[k] !== '') {
-        affected.push({ scheme: e.name, field: k, value: e.fields[k] });
-      }
-    }
-  }
-  if (affected.length > 0) {
-    const sample = affected.slice(0, 6).map(a => `• ${a.scheme} → "${a.field}" = "${a.value}"`).join('\n');
-    const extra = affected.length > 6 ? `\n…and ${affected.length - 6} more.` : '';
-    const ok = confirm(
-      `${affected.length} existing field value(s) will be OVERWRITTEN:\n\n${sample}${extra}\n\n` +
-      `Entering a field name that already exists updates that field's values instead of adding a new one. Continue?`
-    );
-    if (!ok) return;
-  }
-
   const schemeIds = [...selectedIds];
   bulkStep2Title.textContent = 'Enter values per scheme';
   bulkStep2Desc.innerHTML = `${schemeIds.length} card${schemeIds.length === 1 ? '' : 's'} in this batch. Leave a cell blank for null. <strong>Tab</strong> / <strong>arrow keys</strong> to navigate.`;
@@ -2331,7 +2311,7 @@ bulkModalNext.addEventListener('click', () => {
     gridHtml += `<tr data-scheme-id="${esc(id)}">`;
     gridHtml += `<td class="bulk-grid-scheme-col"><span class="bulk-scheme-marker">▸</span><strong class="bulk-scheme-name">${esc(e ? e.name : '(unknown)')}</strong></td>`;
     fieldKeys.forEach((k, fi) => {
-      const existing = e && e.fields ? (e.fields[k] || '') : '';
+      const existing = e && e.fields ? (e.fields[k] ?? '') : '';
       const hasExisting = e && e.fields && e.fields[k] !== undefined && e.fields[k] !== '';
       gridHtml += `<td><input type="text" class="bulk-grid-cell${hasExisting ? ' bulk-cell-existing' : ''}" data-fi="${fi}" data-si="${si}" value="${esc(existing)}"${hasExisting ? ` title="Existing value: ${esc(existing)}"` : ''} /></td>`;
     });
@@ -3147,7 +3127,7 @@ document.addEventListener('click', e => {
   // button) arrives here detached from the DOM; closest() finds nothing
   // and it must not be mistaken for an outside click.
   if (!e.target.isConnected) return;
-  if (selectionMode && !e.target.closest('.card') && !e.target.closest('.bulk-action-bar') && !e.target.closest('.modal-overlay')) {
+  if (selectionMode && !e.target.closest('.card') && !e.target.closest('.bulk-action-bar') && !e.target.closest('.modal-overlay') && !e.target.closest('.scroll-flap')) {
     exitSelectionMode();
   }
 });

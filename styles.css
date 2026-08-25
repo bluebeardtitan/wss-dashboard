@@ -862,6 +862,9 @@ header .btn-secondary:hover {
   border-bottom: 2px solid var(--primary);
   margin-bottom: 12px;
   animation: fadeIn 0.2s ease;
+  position: sticky;
+  top: 64px;
+  z-index: 230;
 }
 
 .bulk-action-bar span {
