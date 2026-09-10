@@ -372,7 +372,7 @@ function updatePendingBar() {
 
 // ========== Render ==========
 function render() {
-  const visibleSchemes = schemes.filter(s => showHidden ? true : !s.hidden);
+  const visibleSchemes = getVisibleSchemes();
   const filtered = visibleSchemes.filter(s => schemeMatchesQuery(getEffective(s.id)));
   const exprActive = searchMode === 'expr';
   const exprInvalid = exprActive && !!exprFilter && isExprInvalid(exprFilter);
@@ -406,84 +406,83 @@ function render() {
 
   emptyState.style.display = 'none';
 
-  cardsContainer.innerHTML = filtered.map(s => {
-    const e = getEffective(s.id);
-    const isPending = pendingChanges.has(s.id);
-    const isNew = typeof s.id === 'string';
-    const entries = Object.entries(e.fields || {});
-    const groups = e.groups || [];
-    const groupedKeys = new Set(groups.flatMap(g => g.fields || []));
-    const maxPreview = 3;
+  cardsContainer.innerHTML = filtered.map(renderCard).join('');
+}
 
-    // Separate tags (#key) from regular fields
-    const tags = entries.filter(([k]) => k.startsWith('#')).map(([k, v]) => [k, v]);
-    const regularEntries = entries.filter(([k]) => !k.startsWith('#'));
+function renderCard(s) {
+  const e = getEffective(s.id);
+  const isPending = pendingChanges.has(s.id);
+  const entries = Object.entries(e.fields || {});
+  const groups = e.groups || [];
+  const groupedKeys = new Set(groups.flatMap(g => g.fields || []));
+  const maxPreview = 3;
 
-    // Tags as badges
-    const tagsHtml = tags.length
-      ? `<div class="card-tags">${tags.map(([k, v]) =>
-          `<span class="card-tag">${esc(k)}${v ? ': ' + esc(v) : ''}</span>`
-        ).join('')}</div>`
-      : '';
+  const tags = entries.filter(([k]) => k.startsWith('#'));
+  const regularEntries = entries.filter(([k]) => !k.startsWith('#'));
 
-    let fieldsHtml = '';
-    let shown = 0;
+  const tagsHtml = tags.length
+    ? `<div class="card-tags">${tags.map(([k, v]) =>
+        `<span class="card-tag">${esc(k)}${v ? ': ' + esc(v) : ''}</span>`
+      ).join('')}</div>`
+    : '';
 
-    if (groups.length > 0) {
-      groups.forEach(g => {
-        if (shown >= maxPreview) return;
-        const gFields = (g.fields || []).filter(k => e.fields && e.fields[k] !== undefined && !k.startsWith('#'));
-        if (gFields.length === 0) return;
-        fieldsHtml += `<div class="card-group-header">${esc(g.name)}</div>`;
-        gFields.slice(0, maxPreview - shown).forEach(k => {
-          fieldsHtml += `<div class="card-field"><span class="field-key">${esc(isLinkKey(k) ? linkLabel(k) : k)}</span><span class="field-value${isLinkKey(k) ? ' card-links' : ''}">${fieldValueCellHtml(k, e.fields[k])}</span></div>`;
-          shown++;
-        });
+  let fieldsHtml = '';
+  let shown = 0;
+
+  if (groups.length > 0) {
+    groups.forEach(g => {
+      if (shown >= maxPreview) return;
+      const gFields = (g.fields || []).filter(k => e.fields && e.fields[k] !== undefined && !k.startsWith('#'));
+      if (gFields.length === 0) return;
+      fieldsHtml += `<div class="card-group-header">${esc(g.name)}</div>`;
+      gFields.slice(0, maxPreview - shown).forEach(k => {
+        fieldsHtml += `<div class="card-field"><span class="field-key">${esc(isLinkKey(k) ? linkLabel(k) : k)}</span><span class="field-value${isLinkKey(k) ? ' card-links' : ''}">${fieldValueCellHtml(k, e.fields[k])}</span></div>`;
+        shown++;
       });
-    }
-
-    const ungrouped = regularEntries.filter(([k]) => !groupedKeys.has(k));
-    ungrouped.slice(0, maxPreview - shown).forEach(([k, v]) => {
-      fieldsHtml += `<div class="card-field"><span class="field-key">${esc(isLinkKey(k) ? linkLabel(k) : k)}</span><span class="field-value${isLinkKey(k) ? ' card-links' : ''}">${fieldValueCellHtml(k, v)}</span></div>`;
-      shown++;
     });
+  }
 
-    if (shown === 0 && !tagsHtml) fieldsHtml = '<div class="card-empty">No additional fields</div>';
+  const ungrouped = regularEntries.filter(([k]) => !groupedKeys.has(k));
+  ungrouped.slice(0, maxPreview - shown).forEach(([k, v]) => {
+    fieldsHtml += `<div class="card-field"><span class="field-key">${esc(isLinkKey(k) ? linkLabel(k) : k)}</span><span class="field-value${isLinkKey(k) ? ' card-links' : ''}">${fieldValueCellHtml(k, v)}</span></div>`;
+    shown++;
+  });
 
-    const totalFields = entries.length;
-    const viewMore = totalFields > maxPreview
-      ? `<div class="card-view-more">View all ${totalFields} fields →</div>`
-      : '';
+  if (shown === 0 && !tagsHtml) fieldsHtml = '<div class="card-empty">No additional fields</div>';
 
-    const hiddenBadge = e.hidden ? '<span class="card-hidden-badge">Hidden</span>' : '';
-    const pendingBadge = isPending ? '<span class="card-pending-badge">Unsaved</span>' : '';
+  const totalFields = entries.length;
+  const viewMore = totalFields > maxPreview
+    ? `<div class="card-view-more">View all ${totalFields} fields →</div>`
+    : '';
 
-    const classes = ['card'];
-    if (selectedIds.has(s.id)) classes.push('card-selected');
-    if (e.hidden) classes.push('card-is-hidden');
-    if (isPending) classes.push('card-has-pending');
+  const hiddenBadge = e.hidden ? '<span class="card-hidden-badge">Hidden</span>' : '';
+  const pendingBadge = isPending ? '<span class="card-pending-badge">Unsaved</span>' : '';
 
-    const NAME_MAX = 40;
-    const needsTrunc = e.name.length > NAME_MAX;
-    const truncName = needsTrunc ? esc(e.name.slice(0, NAME_MAX)) + '…' : esc(e.name);
-    const nameHtml = needsTrunc
-      ? `<h3 class="card-name-truncated">${truncName}<a href="#" class="card-name-more">see more</a></h3>`
-      : `<h3>${esc(e.name)}</h3>`;
+  const classes = ['card'];
+  if (selectedIds.has(s.id)) classes.push('card-selected');
+  if (e.hidden) classes.push('card-is-hidden');
+  if (isPending) classes.push('card-has-pending');
 
-    return `
-      <div class="${classes.join(' ')}" data-id="${s.id}">
-        <span class="sel-marker" aria-hidden="true"></span>
-        <div class="card-header">
-          ${nameHtml}${hiddenBadge}${pendingBadge}
-          <div class="card-actions">
-            <button class="edit-btn" title="Edit">✏️</button>
-          </div>
+  const NAME_MAX = 40;
+  const needsTrunc = e.name.length > NAME_MAX;
+  const truncName = needsTrunc ? esc(e.name.slice(0, NAME_MAX)) + '…' : esc(e.name);
+  const nameHtml = needsTrunc
+    ? `<h3 class="card-name-truncated">${truncName}<a href="#" class="card-name-more">see more</a></h3>`
+    : `<h3>${esc(e.name)}</h3>`;
+
+  return `
+    <div class="${classes.join(' ')}" data-id="${s.id}">
+      <span class="sel-marker" aria-hidden="true"></span>
+      <div class="card-header">
+        ${nameHtml}${hiddenBadge}${pendingBadge}
+        <div class="card-actions">
+          <button class="edit-btn" title="Edit">✏️</button>
         </div>
-        ${tagsHtml}
-        <div class="card-body">${fieldsHtml}${viewMore}</div>
       </div>
-    `;
-  }).join('');
+      ${tagsHtml}
+      <div class="card-body">${fieldsHtml}${viewMore}</div>
+    </div>
+  `;
 }
 
 // Card actions are bound once here via delegation; render() only writes innerHTML.
@@ -550,10 +549,10 @@ cardsContainer.addEventListener('pointerdown', e => {
   }, LONG_PRESS_MS);
 });
 
+const ESC_RE = /[&<>]/g;
+const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;' };
 function esc(str) {
-  const d = document.createElement('div');
-  d.textContent = str;
-  return d.innerHTML;
+  return String(str).replace(ESC_RE, c => ESC_MAP[c]);
 }
 
 // ========== Scheme Links ==========
@@ -590,6 +589,10 @@ function knownSchemeNameSet() {
     if (n) set.add(n);
   });
   return set;
+}
+
+function getVisibleSchemes() {
+  return showHidden ? schemes : schemes.filter(s => !s.hidden);
 }
 
 // Values are comma-joined names, but names may contain commas too ("Bore
@@ -977,14 +980,7 @@ function getUniqueFieldKeys() {
 }
 
 function getUniqueTagNames() {
-  const names = new Set();
-  schemes.forEach(s => {
-    const e = getEffective(s.id);
-    Object.keys(e.fields || {}).forEach(k => {
-      if (isTagKey(k)) names.add(tagLabel(k));
-    });
-  });
-  return Array.from(names);
+  return getUniqueFieldKeys().filter(isTagKey).map(tagLabel);
 }
 
 function updateFieldSuggestions() {
@@ -1030,6 +1026,20 @@ function initDragHandle(row) {
   });
 }
 
+function wireRemoveFieldBtn(row, onRemove) {
+  row.querySelector('.remove-field').addEventListener('click', () => {
+    if (row.dataset.isHidden === 'true') {
+      row.remove();
+      updateHiddenFieldsCount();
+    } else {
+      row.dataset.isHidden = 'true';
+      row.classList.add('field-hidden');
+      updateHiddenFieldsCount();
+    }
+    if (onRemove) onRemove();
+  });
+}
+
 function addFieldRow(key = '', value = '', isHidden = false) {
   const idx = fieldRowIndex++;
   const row = document.createElement('div');
@@ -1042,16 +1052,7 @@ function addFieldRow(key = '', value = '', isHidden = false) {
     <input type="text" class="field-value-input" name="field_value_${idx}" placeholder="Value" value="${esc(value)}" />
     <button class="remove-field" type="button" title="Hide field">&times;</button>
   `;
-  row.querySelector('.remove-field').addEventListener('click', () => {
-    if (row.dataset.isHidden === 'true') {
-      row.remove();
-      updateHiddenFieldsCount();
-    } else {
-      row.dataset.isHidden = 'true';
-      row.classList.add('field-hidden');
-      updateHiddenFieldsCount();
-    }
-  });
+  wireRemoveFieldBtn(row);
   initDragHandle(row);
   dynamicFields.appendChild(row);
   updateHiddenFieldsCount();
@@ -1081,14 +1082,7 @@ function updateHiddenFieldsCount() {
 
 // ---------- Link rows (token-chip editor) ----------
 function getUniqueLinkLabels() {
-  const labels = new Set();
-  schemes.forEach(s => {
-    const e = getEffective(s.id);
-    Object.keys(e.fields || {}).forEach(k => {
-      if (isLinkKey(k)) labels.add(linkLabel(k));
-    });
-  });
-  return Array.from(labels);
+  return getUniqueFieldKeys().filter(isLinkKey).map(linkLabel);
 }
 
 // Token-chip picker: selected schemes render as removable chips, the entry
@@ -1222,16 +1216,7 @@ function addLinkRow(label = '', value = '', isHidden = false) {
     <button class="remove-field" type="button" title="Hide field">&times;</button>
   `;
   initLinkEditor(row, value);
-  row.querySelector('.remove-field').addEventListener('click', () => {
-    if (row.dataset.isHidden === 'true') {
-      row.remove();
-      updateHiddenFieldsCount();
-    } else {
-      row.dataset.isHidden = 'true';
-      row.classList.add('field-hidden');
-      updateHiddenFieldsCount();
-    }
-  });
+  wireRemoveFieldBtn(row);
   initDragHandle(row);
   dynamicFields.appendChild(row);
   updateHiddenFieldsCount();
@@ -1253,16 +1238,7 @@ function addTagRow(label = '', value = '', isHidden = false) {
     <input type="text" class="field-value-input" name="field_value_${idx}" placeholder="Value (optional)" value="${esc(value)}" />
     <button class="remove-field" type="button" title="Hide field">&times;</button>
   `;
-  row.querySelector('.remove-field').addEventListener('click', () => {
-    if (row.dataset.isHidden === 'true') {
-      row.remove();
-      updateHiddenFieldsCount();
-    } else {
-      row.dataset.isHidden = 'true';
-      row.classList.add('field-hidden');
-      updateHiddenFieldsCount();
-    }
-  });
+  wireRemoveFieldBtn(row);
   initDragHandle(row);
   dynamicFields.appendChild(row);
   updateHiddenFieldsCount();
@@ -2002,7 +1978,7 @@ function updateExprStatus() {
     exprApplyBtn.disabled = true;
     return;
   }
-  const total = schemes.filter(s => showHidden || !s.hidden).length;
+  const total = getVisibleSchemes().length;
   const n = countExprMatches(q);
   exprApplyBtn.disabled = n === null;
   if (n === null) {
@@ -2242,8 +2218,7 @@ exprPillExit.addEventListener('click', e => {
 // ========== Bulk Operations ==========
 bulkSelectAllBtn.addEventListener('click', () => {
   // Respect the active search: only cards currently matching are selected.
-  const visibleSchemes = schemes
-    .filter(s => showHidden ? true : !s.hidden)
+  const visibleSchemes = getVisibleSchemes()
     .filter(s => schemeMatchesQuery(getEffective(s.id)));
   visibleSchemes.forEach(s => selectedIds.add(s.id));
   updateBulkBar();
@@ -2276,64 +2251,26 @@ bulkDuplicateBtn.addEventListener('click', () => {
 
 // ========== Bulk Fields Modal ==========
 let bulkFieldRowIndex = 0;
-
-function addBulkFieldRow(key = '') {
-  const idx = bulkFieldRowIndex++;
-  const row = document.createElement('div');
-  row.className = 'dynamic-field-row';
-  row.innerHTML = `
-    <span class="drag-handle" draggable="true">⠿</span>
-    <input type="text" class="field-key-input" name="bulk_field_key_${idx}" placeholder="Field name" value="${esc(key)}" list="bulkFieldKeySuggestions" />
-    <button class="remove-field" type="button">&times;</button>
-  `;
-  row.querySelector('.remove-field').addEventListener('click', () => row.remove());
-  initDragHandle(row);
-  bulkDynamicFields.appendChild(row);
-}
-
-// Bulk rows define field NAMES only — values are entered per card in
-// step 2's grid, so there is deliberately no value editor here.
-function addBulkLinkRow(label = '') {
-  const idx = bulkFieldRowIndex++;
-  const row = document.createElement('div');
-  row.className = 'dynamic-field-row link-row';
-  row.innerHTML = `
-    <span class="drag-handle" draggable="true">⠿</span>
-    <input type="text" class="field-key-input" name="bulk_field_key_${idx}" placeholder="Link label (e.g. Feeds)" value="${esc(label ? '→ ' + label : '')}" list="linkLabelSuggestions" />
-    <button class="remove-field" type="button">&times;</button>
-  `;
-  row.querySelector('.remove-field').addEventListener('click', () => row.remove());
-  initDragHandle(row);
-  bulkDynamicFields.appendChild(row);
-}
-
-function addBulkTagRow(label = '') {
-  const idx = bulkFieldRowIndex++;
-  const row = document.createElement('div');
-  row.className = 'dynamic-field-row tag-row';
-  row.innerHTML = `
-    <span class="drag-handle" draggable="true">⠿</span>
-    <span class="row-type-icon" aria-hidden="true">🏷️</span>
-    <input type="text" class="field-key-input" name="bulk_field_key_${idx}" placeholder="Tag name" value="${esc(label)}" list="tagNameSuggestions" />
-    <button class="remove-field" type="button">&times;</button>
-  `;
-  row.querySelector('.remove-field').addEventListener('click', () => row.remove());
-  initDragHandle(row);
-  bulkDynamicFields.appendChild(row);
-}
-
 let bulkGroupRowIndex = 0;
 
-function addBulkGroupRow(name = '') {
-  const idx = bulkGroupRowIndex++;
+function addBulkRow(type, key = '') {
+  const isGroup = type === 'group';
+  const idx = isGroup ? bulkGroupRowIndex++ : bulkFieldRowIndex++;
   const row = document.createElement('div');
-  row.className = 'dynamic-group-row';
-  row.innerHTML = `
-    <span class="drag-handle" draggable="true">⠿</span>
-    <span class="group-icon">📁</span>
-    <input type="text" class="group-name-input" name="bulk_group_name_${idx}" placeholder="Group name" value="${esc(name)}" />
-    <button class="remove-field" type="button" title="Remove group">&times;</button>
-  `;
+  row.className = 'dynamic-field-row' + (type === 'field' ? '' : ` ${type}-row`);
+  row.innerHTML = isGroup
+    ? `<span class="drag-handle" draggable="true">⠿</span>
+       <span class="group-icon">📁</span>
+       <input type="text" class="group-name-input" name="bulk_group_name_${idx}" placeholder="Group name" value="${esc(key)}" />
+       <button class="remove-field" type="button" title="Remove group">&times;</button>`
+    : (type === 'tag'
+      ? `<span class="drag-handle" draggable="true">⠿</span>
+         <span class="row-type-icon" aria-hidden="true">🏷️</span>
+         <input type="text" class="field-key-input" name="bulk_field_key_${idx}" placeholder="Tag name" value="${esc(key)}" list="tagNameSuggestions" />
+         <button class="remove-field" type="button">&times;</button>`
+      : `<span class="drag-handle" draggable="true">⠿</span>
+         <input type="text" class="field-key-input" name="bulk_field_key_${idx}" placeholder="Field name" value="${esc(key)}" list="bulkFieldKeySuggestions" />
+         <button class="remove-field" type="button">&times;</button>`);
   row.querySelector('.remove-field').addEventListener('click', () => row.remove());
   initDragHandle(row);
   bulkDynamicFields.appendChild(row);
@@ -2356,7 +2293,7 @@ function openBulkModal() {
   // directly would offer stale (or empty) suggestions.
   updateFieldSuggestions();
   updateBulkFieldSuggestions();
-  addBulkFieldRow();
+  addBulkRow('field');
   bulkStep1.classList.remove('hidden');
   bulkStep2.classList.add('hidden');
   bulkModalNext.classList.remove('hidden');
@@ -2375,10 +2312,10 @@ bulkModalCancel.addEventListener('click', closeBulkModal);
 bulkModal.addEventListener('click', e => {
   if (e.target === bulkModal) closeBulkModal();
 });
-bulkAddFieldBtn.addEventListener('click', () => addBulkFieldRow());
-bulkAddGroupBtn.addEventListener('click', () => addBulkGroupRow());
-bulkAddLinkBtn.addEventListener('click', () => addBulkLinkRow());
-bulkAddTagBtn.addEventListener('click', () => addBulkTagRow());
+bulkAddFieldBtn.addEventListener('click', () => addBulkRow('field'));
+bulkAddGroupBtn.addEventListener('click', () => addBulkRow('group'));
+bulkAddLinkBtn.addEventListener('click', () => addBulkRow('link'));
+bulkAddTagBtn.addEventListener('click', () => addBulkRow('tag'));
 
 bulkModalNext.addEventListener('click', () => {
   const { rows, groups } = parseFieldRows(bulkDynamicFields);
@@ -2587,7 +2524,7 @@ discardBtn.addEventListener('click', () => {
 // ========== Pivot Table ==========
 function getFieldKeys() {
   const keys = new Set();
-  schemes.filter(s => showHidden ? true : !s.hidden).forEach(s => {
+  getVisibleSchemes().forEach(s => {
     const e = getEffective(s.id);
     Object.keys(e.fields || {}).forEach(k => keys.add(k));
   });
@@ -2911,8 +2848,25 @@ copyTableBtn.addEventListener('click', () => {
 });
 
 // ========== Import / Export ==========
+function getExportData() {
+  return schemes.map(s => toExportShape(getEffective(s.id)));
+}
+
+async function importSchemesData(data, replaceMode) {
+  if (!Array.isArray(data) || !data.every(s => s.name)) {
+    alert('Invalid format: expected an array of objects with at least a "name" property.');
+    return false;
+  }
+  if (replaceMode) await dbClear();
+  for (const s of data) {
+    await dbAdd(normalizeScheme(s));
+  }
+  await loadSchemes();
+  return true;
+}
+
 function exportJSON() {
-  const data = schemes.map(s => toExportShape(getEffective(s.id)));
+  const data = getExportData();
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   downloadBlob(blob, `schemes-${new Date().toISOString().slice(0, 10)}.json`);
   showToast('Data exported');
@@ -2923,19 +2877,10 @@ function importJSON(file) {
   reader.onload = async e => {
     try {
       const data = JSON.parse(e.target.result);
-      if (!Array.isArray(data) || !data.every(s => s.name)) {
-        alert('Invalid format: expected an array of objects with at least a "name" property.');
-        return;
-      }
       const mode = confirm('Click OK to replace all data, or Cancel to append to existing data.');
-      if (mode) {
-        await dbClear();
+      if (await importSchemesData(data, mode)) {
+        showToast(`Imported ${data.length} card${data.length !== 1 ? 's' : ''}`);
       }
-      for (const s of data) {
-        await dbAdd(normalizeScheme(s));
-      }
-      await loadSchemes();
-      showToast(`Imported ${data.length} card${data.length !== 1 ? 's' : ''}`);
     } catch (err) {
       alert('Failed to parse JSON file: ' + err.message);
     }
@@ -3180,7 +3125,7 @@ dataDrivePush.addEventListener('click', async () => {
   if (!ensureDriveToken()) return;
   closeDataMenuModal();
   try {
-    const data = schemes.map(s => toExportShape(getEffective(s.id)));
+    const data = getExportData();
     const folderId = await driveGetOrCreateFolder(DRIVE_BACKUP_FOLDER);
     await driveUpload(DRIVE_BACKUP_FILE, data, folderId);
     showToast('Synced to Google Drive');
@@ -3196,17 +3141,10 @@ dataDrivePull.addEventListener('click', async () => {
   try {
     const folderId = await driveGetOrCreateFolder(DRIVE_BACKUP_FOLDER);
     const data = await driveDownload(DRIVE_BACKUP_FILE, folderId);
-    if (!Array.isArray(data) || !data.every(s => s.name)) {
-      alert('Invalid backup format on Drive.');
-      return;
-    }
     const mode = confirm('Click OK to replace all local data, or Cancel to append.');
-    if (mode) await dbClear();
-    for (const s of data) {
-      await dbAdd(normalizeScheme(s));
+    if (await importSchemesData(data, mode)) {
+      showToast(`Synced ${data.length} card${data.length !== 1 ? 's' : ''} from Drive`);
     }
-    await loadSchemes();
-    showToast(`Synced ${data.length} card${data.length !== 1 ? 's' : ''} from Drive`);
   } catch (err) {
     console.error(err);
     showToast('Sync failed: ' + err.message);

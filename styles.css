@@ -745,6 +745,54 @@ header .btn-secondary:hover {
   display: none !important;
 }
 
+/* Flex rows that must not wrap: horizontal scroll on overflow.
+   Link rows are excluded — they intentionally wrap (label + chip editor
+   on separate lines). */
+.modal-body .card-field,
+.modal-body .detail-row,
+.modal-body .dynamic-field-row:not(.link-row) {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.modal-body .card-field::-webkit-scrollbar,
+.modal-body .detail-row::-webkit-scrollbar,
+.modal-body .dynamic-field-row::-webkit-scrollbar {
+  display: none;
+}
+.modal-body .card-field .field-key,
+.modal-body .detail-row .detail-key {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.modal-body .card-field .field-value,
+.modal-body .detail-row .detail-value {
+  flex-shrink: 0;
+  white-space: nowrap;
+  max-width: none;
+}
+
+/* Outside modals (card grid), keep field rows compact */
+.card-field {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.card-field::-webkit-scrollbar {
+  display: none;
+}
+.card-field .field-key {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.card-field .field-value {
+  flex-shrink: 0;
+  white-space: nowrap;
+  max-width: none;
+}
+
 .field-label {
   display: block;
   font-weight: 600;
@@ -2421,9 +2469,29 @@ tr.bulk-row-active td:not(.bulk-grid-scheme-col) {
     gap: 14px;
   }
   .stats-bar { padding: 12px 16px; }
-  .pending-bar { padding: 8px 16px; flex-wrap: wrap; gap: 6px; }
-  .bulk-action-bar { padding: 8px 16px; flex-wrap: wrap; gap: 6px; }
+  .pending-bar {
+    padding: 8px 16px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .pending-bar::-webkit-scrollbar { display: none; }
+  .bulk-action-bar {
+    padding: 8px 16px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .bulk-action-bar::-webkit-scrollbar { display: none; }
   .pivot-controls { grid-template-columns: 1fr; }
+  .modal-body .card-field,
+  .modal-body .detail-row,
+  .modal-body .dynamic-field-row:not(.link-row) {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
 }
 
 /* ========== Scroll Glow ========== */
@@ -2942,6 +3010,7 @@ button.link-chip:hover {
 .dynamic-field-row .link-entry {
   flex: 1 1 100px;
   min-width: 0;
+  max-width: 100%;
   padding: 4px 6px;
   border: none;
   border-radius: 0;
@@ -2949,6 +3018,12 @@ button.link-chip:hover {
   color: var(--text);
   font-size: 0.88rem;
   outline: none;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.dynamic-field-row .link-entry::-webkit-scrollbar {
+  display: none;
 }
 
 .link-entry::placeholder {
