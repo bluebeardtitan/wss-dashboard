@@ -1428,6 +1428,7 @@ tr.bulk-row-active td:not(.bulk-grid-scheme-col) {
   align-items: center;
   margin-bottom: 8px;
   animation: slideIn 0.2s ease;
+  min-width: 0;
 }
 
 .dynamic-field-row input {
@@ -2883,12 +2884,14 @@ button.link-chip:hover {
   align-items: center;
   gap: 4px;
   min-height: 38px;
+  min-width: 0;
   padding: 3px 6px;
   border: 2px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg);
   cursor: text;
   transition: border var(--transition);
+  box-sizing: border-box;
 }
 
 .dynamic-field-row .link-editor:focus-within {
@@ -2919,6 +2922,8 @@ button.link-chip:hover {
 .dynamic-field-row.link-row:has(.link-editor) .link-editor {
   order: 3;
   flex: 1 1 100%;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .link-chip-edit {
@@ -2935,8 +2940,8 @@ button.link-chip:hover {
 }
 
 .dynamic-field-row .link-entry {
-  flex: 1 1 160px;
-  min-width: 160px;
+  flex: 1 1 100px;
+  min-width: 0;
   padding: 4px 6px;
   border: none;
   border-radius: 0;
