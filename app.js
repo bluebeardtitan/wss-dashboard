@@ -2955,6 +2955,15 @@ function clearDriveToken() {
   window._gdriveTokenExpiry = 0;
   localStorage.removeItem('gdrive_token');
   localStorage.removeItem('gdrive_token_expiry');
+  localStorage.removeItem('gdrive_last_sync');
+}
+
+function getLastSyncTime() {
+  return parseInt(localStorage.getItem('gdrive_last_sync') || '0', 10);
+}
+
+function setLastSyncTime() {
+  localStorage.setItem('gdrive_last_sync', String(Date.now()));
 }
 
 const _driveClientIdB64 = 'MTA2NzA3NTQ5NTIwMC1wMGhhdXJuanRwMzJvZm51YWVuNzQ5NzBybDN1OHY1di5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbQ==';
@@ -3125,9 +3134,23 @@ dataDrivePush.addEventListener('click', async () => {
   if (!ensureDriveToken()) return;
   closeDataMenuModal();
   try {
-    const data = getExportData();
     const folderId = await driveGetOrCreateFolder(DRIVE_BACKUP_FOLDER);
+    const lastSync = getLastSyncTime();
+    if (lastSync) {
+      const files = await driveListFiles(DRIVE_BACKUP_FILE, folderId);
+      if (files.length > 0 && files[0].modifiedTime) {
+        const driveModified = new Date(files[0].modifiedTime).getTime();
+        if (driveModified > lastSync) {
+          const driveDate = new Date(driveModified).toLocaleString();
+          const syncDate = new Date(lastSync).toLocaleString();
+          alert(`Drive backup is newer than your last sync.\n\nDrive modified: ${driveDate}\nLast sync: ${syncDate}\n\nPull from Drive first to get the latest data, then push your changes.`);
+          return;
+        }
+      }
+    }
+    const data = getExportData();
     await driveUpload(DRIVE_BACKUP_FILE, data, folderId);
+    setLastSyncTime();
     showToast('Synced to Google Drive');
   } catch (err) {
     console.error(err);
@@ -3138,11 +3161,16 @@ dataDrivePush.addEventListener('click', async () => {
 dataDrivePull.addEventListener('click', async () => {
   if (!ensureDriveToken()) return;
   closeDataMenuModal();
+  if (pendingChanges.size > 0) {
+    alert(`You have ${pendingChanges.size} uncommitted change(s). Commit or discard them before pulling from Drive.`);
+    return;
+  }
   try {
     const folderId = await driveGetOrCreateFolder(DRIVE_BACKUP_FOLDER);
     const data = await driveDownload(DRIVE_BACKUP_FILE, folderId);
     const mode = confirm('Click OK to replace all local data, or Cancel to append.');
     if (await importSchemesData(data, mode)) {
+      setLastSyncTime();
       showToast(`Synced ${data.length} card${data.length !== 1 ? 's' : ''} from Drive`);
     }
   } catch (err) {
