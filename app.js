@@ -262,6 +262,8 @@ const bulkStep2Desc = document.getElementById('bulkStep2Desc');
 
 // Copy from
 const copyFromSelect = document.getElementById('copyFromSelect');
+const copyFromInput = document.getElementById('copyFromInput');
+const copySuggest = document.getElementById('copySuggest');
 const copyFromPicklist = document.getElementById('copyFromPicklist');
 const copyPicklistBody = document.getElementById('copyPicklistBody');
 const copyPickAll = document.getElementById('copyPickAll');
@@ -740,18 +742,106 @@ function openModal(scheme = null) {
 
   renderHiddenFieldsToggle(hiddenEntries.length);
 
-  // Populate copy-from dropdown (exclude current scheme)
-  copyFromSelect.innerHTML = '<option value="">— Select a card —</option>';
-  schemes.filter(s => s.id !== editingId).forEach(s => {
-    const e = getEffective(s.id);
-    copyFromSelect.innerHTML += `<option value="${s.id}">${esc(e.name)}</option>`;
-  });
+  // Populate copy-from searchable list (exclude current scheme)
+  copyFromData = schemes.filter(s => s.id !== editingId).map(s => ({
+    id: s.id,
+    name: (getEffective(s.id).name || '').trim()
+  }));
+  copyFromInput.value = '';
   copyFromSelect.value = '';
+  copySuggest.innerHTML = '';
+  copySuggest.classList.add('hidden');
   copyFromPicklist.classList.add('hidden');
 
   schemeModal.classList.remove('hidden');
   setTimeout(() => schemeNameInput.focus(), 100);
 }
+
+// ---------- Copy-from searchable dropdown ----------
+let copyFromData = [];
+
+function filterCopySchemes(query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return copyFromData;
+  return copyFromData.filter(s => s.name.toLowerCase().includes(q));
+}
+
+function renderCopySuggestions(query) {
+  const matches = filterCopySchemes(query);
+  if (!matches.length) {
+    copySuggest.innerHTML = '<div class="cs-empty">No matching cards</div>';
+    copySuggest.classList.remove('hidden');
+    return;
+  }
+  const q = (query || '').trim().toLowerCase();
+  copySuggest.innerHTML = matches.map(s => {
+    const hl = q ? highlightMatch(s.name, q) : esc(s.name);
+    return `<button type="button" class="cs-item" data-id="${escAttr(String(s.id))}">${hl}</button>`;
+  }).join('');
+  copySuggest.classList.remove('hidden');
+  if (!copySuggest._glowInit) { initScrollGlow(copySuggest); copySuggest._glowInit = true; }
+}
+
+function highlightMatch(name, q) {
+  const i = name.toLowerCase().indexOf(q);
+  if (i === -1) return esc(name);
+  return esc(name.slice(0, i)) + '<mark>' + esc(name.slice(i, i + q.length)) + '</mark>' + esc(name.slice(i + q.length));
+}
+
+function selectCopyScheme(id) {
+  copyFromSelect.value = String(id);
+  const match = copyFromData.find(s => String(s.id) === String(id));
+  copyFromInput.value = match ? match.name : '';
+  copySuggest.classList.add('hidden');
+  copyFromSelect.dispatchEvent(new Event('change'));
+}
+
+copyFromInput.addEventListener('input', () => {
+  copyFromSelect.value = '';
+  copyFromPicklist.classList.add('hidden');
+  renderCopySuggestions(copyFromInput.value);
+});
+
+copyFromInput.addEventListener('focus', () => {
+  renderCopySuggestions(copyFromInput.value);
+});
+
+copyFromInput.addEventListener('blur', () => {
+  setTimeout(() => copySuggest.classList.add('hidden'), 150);
+});
+
+copyFromInput.addEventListener('keydown', e => {
+  const items = copySuggest.querySelectorAll('.cs-item');
+  const activeIdx = [...items].findIndex(el => el.classList.contains('cs-active'));
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    const next = activeIdx < items.length - 1 ? activeIdx + 1 : 0;
+    items.forEach((el, i) => el.classList.toggle('cs-active', i === next));
+    if (items[next]) items[next].scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    const prev = activeIdx > 0 ? activeIdx - 1 : items.length - 1;
+    items.forEach((el, i) => el.classList.toggle('cs-active', i === prev));
+    if (items[prev]) items[prev].scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (activeIdx >= 0 && items[activeIdx]) {
+      selectCopyScheme(items[activeIdx].dataset.id);
+    } else if (items.length === 1) {
+      selectCopyScheme(items[0].dataset.id);
+    }
+  } else if (e.key === 'Escape') {
+    copySuggest.classList.add('hidden');
+  }
+});
+
+copySuggest.addEventListener('mousedown', e => {
+  const item = e.target.closest('.cs-item');
+  if (!item) return;
+  e.preventDefault();
+  selectCopyScheme(item.dataset.id);
+});
 
 copyFromSelect.addEventListener('change', () => {
   const sourceId = copyFromSelect.value;
@@ -855,6 +945,8 @@ copyFromBtn.addEventListener('click', () => {
 
   showToast(`Copied ${checkedFieldKeys.size} field(s) from "${source.name}"`);
   copyFromSelect.value = '';
+  copyFromInput.value = '';
+  copySuggest.classList.add('hidden');
   copyFromPicklist.classList.add('hidden');
 });
 

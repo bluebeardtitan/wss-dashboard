@@ -78,10 +78,13 @@
           <div class="field-label">Custom Fields</div>
           <div class="copy-from-section" id="copyFromSection">
             <div class="copy-from-header">
-              <label for="copyFromSelect">Copy from:</label>
-              <select id="copyFromSelect">
-                <option value="">— Select a card —</option>
-              </select>
+              <label>Copy from:</label>
+              <div class="copy-from-picker" id="copyFromPicker">
+                <input type="text" class="copy-from-input" id="copyFromInput"
+                       placeholder="Search cards to copy fields from…" autocomplete="off" spellcheck="false" />
+                <input type="hidden" id="copyFromSelect" value="" />
+                <div class="copy-suggest hidden" id="copySuggest"></div>
+              </div>
             </div>
             <div class="copy-from-picklist hidden" id="copyFromPicklist">
               <div class="copy-picklist-header">
