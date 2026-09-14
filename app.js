@@ -224,8 +224,7 @@ const dataMenuClose = document.getElementById('dataMenuClose');
 const dataImportLocal = document.getElementById('dataImportLocal');
 const dataExportLocal = document.getElementById('dataExportLocal');
 const dataDriveConnect = document.getElementById('dataDriveConnect');
-const dataDrivePull = document.getElementById('dataDrivePull');
-const dataDrivePush = document.getElementById('dataDrivePush');
+const dataDriveSync = document.getElementById('dataDriveSync');
 const driveStatusText = document.getElementById('driveStatusText');
 const driveStatusSub = document.getElementById('driveStatusSub');
 const driveConnectDesc = document.getElementById('driveConnectDesc');
@@ -2504,6 +2503,7 @@ commitBtn.addEventListener('click', async () => {
   }
   pendingChanges.clear();
   await loadSchemes();
+  setLocalModifiedAt();
   exitSelectionMode();
   showToast(`${committed} change${committed !== 1 ? 's' : ''} committed`);
 });
@@ -2862,6 +2862,7 @@ async function importSchemesData(data, replaceMode) {
     await dbAdd(normalizeScheme(s));
   }
   await loadSchemes();
+  setLocalModifiedAt();
   return true;
 }
 
@@ -2894,7 +2895,9 @@ function openDataMenuModal() {
 
   if (connected) {
     driveStatusText.textContent = 'Connected to Google Drive';
-    driveStatusSub.textContent = '';
+    const v = getLastSyncVersion();
+    const at = getLastSyncAt();
+    driveStatusSub.textContent = v > 0 ? `Last synced v${v} · ${new Date(at).toLocaleString()}` : 'Never synced';
     driveConnectLabel.textContent = 'Disconnect from Google';
     driveConnectIcon.textContent = '🔌';
     driveConnectDesc.textContent = 'Click to sign out';
@@ -2908,8 +2911,7 @@ function openDataMenuModal() {
     driveConnectDesc.style.opacity = '1';
   }
 
-  dataDrivePull.disabled = !connected;
-  dataDrivePush.disabled = !connected;
+  dataDriveSync.disabled = !connected;
   dataMenuModal.classList.remove('hidden');
 }
 
@@ -2956,14 +2958,46 @@ function clearDriveToken() {
   localStorage.removeItem('gdrive_token');
   localStorage.removeItem('gdrive_token_expiry');
   localStorage.removeItem('gdrive_last_sync');
+  localStorage.removeItem('gdrive_last_sync_version');
+  localStorage.removeItem('gdrive_last_sync_at');
+  localStorage.removeItem('gdrive_local_modified_at');
 }
 
-function getLastSyncTime() {
-  return parseInt(localStorage.getItem('gdrive_last_sync') || '0', 10);
+function getDeviceId() {
+  let id = localStorage.getItem('gdrive_device_id');
+  if (!id) {
+    id = 'dev-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+    localStorage.setItem('gdrive_device_id', id);
+  }
+  return id;
 }
 
-function setLastSyncTime() {
-  localStorage.setItem('gdrive_last_sync', String(Date.now()));
+function getLastSyncVersion() {
+  return parseInt(localStorage.getItem('gdrive_last_sync_version') || '0', 10);
+}
+
+function getLastSyncAt() {
+  let v = parseInt(localStorage.getItem('gdrive_last_sync_at') || '0', 10);
+  // Migrate the legacy single wall-clock sync marker if present.
+  if (!v) v = parseInt(localStorage.getItem('gdrive_last_sync') || '0', 10);
+  return v;
+}
+
+function getLocalModifiedAt() {
+  return parseInt(localStorage.getItem('gdrive_local_modified_at') || '0', 10);
+}
+
+function setLocalModifiedAt() {
+  localStorage.setItem('gdrive_local_modified_at', String(Date.now()));
+}
+
+function setLastSyncState(version) {
+  const now = Date.now();
+  localStorage.setItem('gdrive_last_sync_version', String(version));
+  localStorage.setItem('gdrive_last_sync_at', String(now));
+  // After a successful sync the local copy agrees with Drive at this point,
+  // so no "local changed since last sync" conflict is flagged.
+  localStorage.setItem('gdrive_local_modified_at', String(now));
 }
 
 const _driveClientIdB64 = 'MTA2NzA3NTQ5NTIwMC1wMGhhdXJuanRwMzJvZm51YWVuNzQ5NzBybDN1OHY1di5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbQ==';
@@ -3054,6 +3088,8 @@ function ensureDriveToken() {
 
 const DRIVE_BACKUP_FOLDER = 'MAK-Projects/Scheme-DB-Dashboard';
 const DRIVE_BACKUP_FILE = 'scheme-database-backup.json';
+const DRIVE_VERSION_FILE = 'scheme-database-version.json';
+const DRIVE_REVISIONS_FOLDER = 'MAK-Projects/Scheme-DB-Dashboard/revisions';
 
 async function driveGetOrCreateFolder(path) {
   const parts = path.split('/').filter(Boolean);
@@ -3090,7 +3126,7 @@ async function driveListFiles(name, parentId) {
   return (await res.json()).files || [];
 }
 
-async function driveUpload(name, data, parentId) {
+async function driveUpload(name, data, parentId, silent = false) {
   const files = await driveListFiles(name, parentId);
   const metadata = { name, mimeType: 'application/json' };
   if (parentId) metadata.parents = [parentId];
@@ -3103,7 +3139,7 @@ async function driveUpload(name, data, parentId) {
       body
     });
     if (!res.ok) throw new Error('Drive update failed: ' + res.status);
-    showToast('Updated existing file on Drive');
+    if (!silent) showToast('Updated existing file on Drive');
   } else {
     const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
       method: 'POST',
@@ -3116,7 +3152,7 @@ async function driveUpload(name, data, parentId) {
       })()
     });
     if (!res.ok) throw new Error('Drive create failed: ' + res.status);
-    showToast('Created backup on Drive');
+    if (!silent) showToast('Created backup on Drive');
   }
 }
 
@@ -3130,52 +3166,125 @@ async function driveDownload(name, parentId) {
   return await res.json();
 }
 
-dataDrivePush.addEventListener('click', async () => {
-  if (!ensureDriveToken()) return;
-  closeDataMenuModal();
-  try {
-    const folderId = await driveGetOrCreateFolder(DRIVE_BACKUP_FOLDER);
-    const lastSync = getLastSyncTime();
-    if (lastSync) {
-      const files = await driveListFiles(DRIVE_BACKUP_FILE, folderId);
-      if (files.length > 0 && files[0].modifiedTime) {
-        const driveModified = new Date(files[0].modifiedTime).getTime();
-        if (driveModified > lastSync) {
-          const driveDate = new Date(driveModified).toLocaleString();
-          const syncDate = new Date(lastSync).toLocaleString();
-          alert(`Drive backup is newer than your last sync.\n\nDrive modified: ${driveDate}\nLast sync: ${syncDate}\n\nPull from Drive first to get the latest data, then push your changes.`);
-          return;
-        }
-      }
-    }
-    const data = getExportData();
-    await driveUpload(DRIVE_BACKUP_FILE, data, folderId);
-    setLastSyncTime();
-    showToast('Synced to Google Drive');
-  } catch (err) {
-    console.error(err);
-    showToast('Sync failed: ' + err.message);
-  }
-});
+// ========== Unified Drive sync (version-tracked) ==========
+async function driveReadVersion(parentId) {
+  const files = await driveListFiles(DRIVE_VERSION_FILE, parentId);
+  if (files.length === 0) return null;
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${files[0].id}?alt=media`, {
+    headers: { Authorization: 'Bearer ' + window._gdriveToken }
+  });
+  if (!res.ok) throw new Error('Drive version read failed: ' + res.status);
+  const meta = await res.json();
+  // A malformed/foreign version file is treated as absent (baseline path).
+  if (!meta || typeof meta.version !== 'number') return null;
+  return meta;
+}
 
-dataDrivePull.addEventListener('click', async () => {
+function buildVersionMeta(version, action, prevMeta) {
+  const now = new Date().toISOString();
+  const entry = { version, updatedAt: now, deviceId: getDeviceId(), action };
+  const history = [entry];
+  if (prevMeta && Array.isArray(prevMeta.history)) history.push(...prevMeta.history);
+  return { version, deviceId: getDeviceId(), updatedAt: now, history: history.slice(0, 20) };
+}
+
+async function driveWriteVersion(parentId, meta) {
+  await driveUpload(DRIVE_VERSION_FILE, meta, parentId, true);
+}
+
+async function driveSaveRevision(data, reason) {
+  const revFolderId = await driveGetOrCreateFolder(DRIVE_REVISIONS_FOLDER);
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  const name = `scheme-revision-${stamp}-${reason}.json`;
+  await driveUpload(name, data, revFolderId, true);
+}
+
+async function syncPush(folderId, driveMeta, baseVersion) {
+  const nextVersion = baseVersion + 1;
+  const data = getExportData();
+  await driveUpload(DRIVE_BACKUP_FILE, data, folderId, true);
+  await driveWriteVersion(folderId, buildVersionMeta(nextVersion, 'push', driveMeta));
+  setLastSyncState(nextVersion);
+}
+
+async function syncPull(folderId, driveMeta, driveVersion) {
+  const data = await driveDownload(DRIVE_BACKUP_FILE, folderId);
+  await importSchemesData(data, true);
+  await driveWriteVersion(folderId, buildVersionMeta(driveVersion, 'pull', driveMeta));
+  setLastSyncState(driveVersion);
+}
+
+dataDriveSync.addEventListener('click', async () => {
   if (!ensureDriveToken()) return;
   closeDataMenuModal();
   if (pendingChanges.size > 0) {
-    alert(`You have ${pendingChanges.size} uncommitted change(s). Commit or discard them before pulling from Drive.`);
+    alert(`You have ${pendingChanges.size} uncommitted change(s). Commit or discard them before syncing with Drive.`);
     return;
   }
+  dataDriveSync.disabled = true;
   try {
     const folderId = await driveGetOrCreateFolder(DRIVE_BACKUP_FOLDER);
-    const data = await driveDownload(DRIVE_BACKUP_FILE, folderId);
-    const mode = confirm('Click OK to replace all local data, or Cancel to append.');
-    if (await importSchemesData(data, mode)) {
-      setLastSyncTime();
-      showToast(`Synced ${data.length} card${data.length !== 1 ? 's' : ''} from Drive`);
+    const driveMeta = await driveReadVersion(folderId);
+    const localV = getLastSyncVersion();
+    const localChanged = getLocalModifiedAt() > getLastSyncAt();
+
+    // ---- No version history on Drive: establish a baseline ----
+    if (!driveMeta) {
+      const legacy = await driveListFiles(DRIVE_BACKUP_FILE, folderId);
+      if (legacy.length === 0) {
+        await syncPush(folderId, null, 0);
+        showToast('Uploaded local data as baseline (v1)');
+      } else if (confirm('No sync history found on Drive, but a backup file already exists there.\n\nOK = Download the Drive backup (replaces local data)\nCancel = Upload local data to Drive as the new baseline')) {
+        await syncPull(folderId, null, 1);
+        showToast('Downloaded existing Drive backup (baseline v1)');
+      } else {
+        await syncPush(folderId, null, 0);
+        showToast('Uploaded local data as baseline (v1)');
+      }
+      return;
+    }
+
+    const driveV = driveMeta.version;
+
+    // Drive copy was replaced/reset behind our back: refuse rather than clobber.
+    if (driveV < localV) {
+      alert(`Drive is at v${driveV} but your last sync was v${localV}. The Drive copy appears to have been reset or replaced.\n\nSkipping sync to avoid data loss. Re-establish a baseline with a manual export/import if the Drive backup is authoritative.`);
+      return;
+    }
+
+    if (driveV > localV) {
+      // Cloud is ahead of what this device has seen.
+      if (!localChanged) {
+        await syncPull(folderId, driveMeta, driveV);
+        showToast(`Downloaded newer version from Drive (v${driveV})`);
+      } else {
+        // True conflict: both sides changed since the last sync.
+        const keepLocal = confirm(`Your local data and the Drive backup both changed since your last sync (you were at v${localV}, Drive is now v${driveV}).\n\nOK = Keep LOCAL changes and upload them to Drive\nCancel = Keep DRIVE changes and replace local data\n\nEither way, the losing copy is preserved as a revision on Drive.`);
+        if (keepLocal) {
+          const driveData = await driveDownload(DRIVE_BACKUP_FILE, folderId);
+          await driveSaveRevision(driveData, 'conflict-drive');
+          await syncPush(folderId, driveMeta, driveV);
+          showToast(`Kept local changes (uploaded v${driveV + 1}); Drive copy saved as revision`);
+        } else {
+          await driveSaveRevision(getExportData(), 'conflict-local');
+          await syncPull(folderId, driveMeta, driveV);
+          showToast(`Kept Drive changes (v${driveV}); local copy saved as revision`);
+        }
+      }
+    } else {
+      // Local is caught up with (or equal to) Drive.
+      if (localChanged) {
+        await syncPush(folderId, driveMeta, localV);
+        showToast(`Uploaded local changes (v${localV + 1})`);
+      } else {
+        showToast(`Already up to date (v${localV})`);
+      }
     }
   } catch (err) {
     console.error(err);
     showToast('Sync failed: ' + err.message);
+  } finally {
+    dataDriveSync.disabled = false;
   }
 });
 
