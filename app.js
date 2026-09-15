@@ -1283,9 +1283,6 @@ function collectFieldData() {
 addSchemeBtn.addEventListener('click', () => openModal());
 modalClose.addEventListener('click', closeModal);
 modalCancel.addEventListener('click', closeModal);
-schemeModal.addEventListener('click', e => {
-  if (e.target === schemeModal) closeModal();
-});
 
 addFieldBtn.addEventListener('click', () => addFieldRow('', ''));
 addGroupBtn.addEventListener('click', () => addGroupRow(''));
@@ -2224,7 +2221,6 @@ function exitExprMode() {
 exprApplyBtn.addEventListener('click', applyExprFromEditor);
 exprCancelBtn.addEventListener('click', closeQueryModal);
 queryModalClose.addEventListener('click', closeQueryModal);
-queryModal.addEventListener('click', e => { if (e.target === queryModal) closeQueryModal(); });
 exprRemoveBtn.addEventListener('click', () => { exitExprMode(); closeQueryModal(); });
 exprModeBtn.addEventListener('click', openQueryModal);
 exprPill.addEventListener('click', openQueryModal);
@@ -2329,9 +2325,6 @@ function closeBulkModal() {
 bulkFieldsBtn.addEventListener('click', openBulkModal);
 bulkModalClose.addEventListener('click', closeBulkModal);
 bulkModalCancel.addEventListener('click', closeBulkModal);
-bulkModal.addEventListener('click', e => {
-  if (e.target === bulkModal) closeBulkModal();
-});
 bulkAddFieldBtn.addEventListener('click', () => addBulkRow('field'));
 bulkAddGroupBtn.addEventListener('click', () => addBulkRow('group'));
 bulkAddLinkBtn.addEventListener('click', () => addBulkRow('link'));
@@ -2578,9 +2571,6 @@ function openPivotModal() {
 
 pivotBtn.addEventListener('click', openPivotModal);
 pivotModalClose.addEventListener('click', () => pivotModal.classList.add('hidden'));
-pivotModal.addEventListener('click', e => {
-  if (e.target === pivotModal) pivotModal.classList.add('hidden');
-});
 
 pivotModal.addEventListener('click', e => {
   const btn = e.target.closest('.check-all-btn, .check-none-btn');
@@ -2942,9 +2932,6 @@ function closeDataMenuModal() {
 
 dataMenuBtn.addEventListener('click', openDataMenuModal);
 dataMenuClose.addEventListener('click', closeDataMenuModal);
-dataMenuModal.addEventListener('click', e => {
-  if (e.target === dataMenuModal) closeDataMenuModal();
-});
 
 dataImportLocal.addEventListener('click', () => {
   closeDataMenuModal();
