@@ -595,32 +595,53 @@ function getVisibleSchemes() {
 }
 
 // Values are comma-joined names, but names may contain commas too ("Bore
-// Well, Main"), so a plain split shreds one target into fragments. Rebuild:
-// keep fragments that already match a real scheme, then greedily rejoin runs
-// of leftovers longest-first until the joined text matches. When both
-// readings are valid the single-target reading wins, since multi-link lists
-// are the common case; anything unmatched stays a fragment and renders as an
-// unresolved chip. Stored text is never rewritten by this.
-function parseLinkTargets(v) {
-  const parts = String(v || '').split(',').map(s => s.trim()).filter(Boolean);
-  if (!parts.length) return [];
-  const known = knownSchemeNameSet();
+// Well, Main"), so a plain split shreds one target into fragments. Instead,
+// scan the raw text positionally and prefer the LONGEST known scheme name
+// that starts at each position and is followed by a separator (comma) or the
+// end — this keeps large names that span commas intact ("Bore Well, Main
+// Road" matches the scheme of that full name, not the shorter "Bore Well").
+// A known name is only consumed when it sits on its own comma boundary, so a
+// free-typed name that merely starts with a known one is left whole. Anything
+// unmatched stays as a comma-split fragment and renders as an unresolved chip.
+// Stored text is never rewritten by this.
+function parseLinkTargets(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return [];
+  const lower = raw.toLowerCase();
+  const names = Array.from(knownSchemeNameSet()).sort((a, b) => b.length - a.length);
   const out = [];
   let i = 0;
-  while (i < parts.length) {
-    if (known.has(parts[i].toLowerCase())) {
-      out.push(parts[i]);
-      i++;
+  while (i < raw.length) {
+    const ch = raw[i];
+    if (ch === ',' || ch === ' ') { i++; continue; }
+    // Longest known-name match at this position, boundary-checked.
+    let best = null;
+    for (const name of names) {
+      if (!name) continue;
+      if (lower.startsWith(name, i)) {
+        const next = raw[i + name.length];
+        if (next === undefined || next === ',') {
+          best = name;
+          break; // sorted longest-first, so the first hit is the longest
+        }
+        break; // known name is only a prefix of a longer unknown name
+      }
+    }
+    if (best) {
+      out.push(raw.slice(i, i + best.length));
+      i += best.length;
       continue;
     }
-    let j = parts.length;
-    while (j > i + 1 && !known.has(parts.slice(i, j).join(', ').toLowerCase())) j--;
-    if (j > i + 1) {
-      out.push(parts.slice(i, j).join(', '));
-      i = j;
+    // No known-name match: keep the next comma-free fragment whole.
+    const nextComma = raw.indexOf(',', i);
+    if (nextComma === -1) {
+      const frag = raw.slice(i).trim();
+      if (frag) out.push(frag);
+      i = raw.length;
     } else {
-      out.push(parts[i]);
-      i++;
+      const frag = raw.slice(i, nextComma).trim();
+      if (frag) out.push(frag);
+      i = nextComma + 1;
     }
   }
   return out;
