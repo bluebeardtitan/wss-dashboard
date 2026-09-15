@@ -1593,16 +1593,17 @@ function isExprInvalid(q) {
 
 // Text-mode grammar: term [term …] [| term [term …]]…
 // Whitespace-separated terms AND together; | separates OR groups, and AND
-// binds tighter (split on | first, then on spaces). Every term is a
-// case-insensitive substring across the card name, field keys and values.
-// Degenerate queries degrade gracefully: empty terms/groups are dropped, a
-// lone separator equals the bare term, an all-empty query matches all.
+// binds tighter (split on | first, then on spaces). Each term is tested
+// against the card name, field keys and values under the selected matching
+// mode (see "Matching mode" below). Degenerate queries degrade gracefully:
+// empty terms/groups are dropped, a lone separator equals the bare term, an
+// all-empty query matches all.
 function textTermMatches(term, e) {
-  return (e.name || '').toLowerCase().includes(term) ||
-    Object.entries(e.fields || {}).some(([k, v]) =>
-      k.toLowerCase().includes(term) ||
-      String(v).toLowerCase().includes(term)
-    );
+  const cells = [String(e.name || '')];
+  Object.entries(e.fields || {}).forEach(([k, v]) => {
+    cells.push(k, String(v));
+  });
+  return cells.some(cell => cellMatches(searchMatchMode, cell, term));
 }
 
 function textQueryMatches(q, e) {
@@ -1612,6 +1613,31 @@ function textQueryMatches(q, e) {
     .filter(g => g.length);
   if (!groups.length) return true;
   return groups.some(terms => terms.every(t => textTermMatches(t, e)));
+}
+
+// ---------- Matching mode (text mode only) ----------
+// How a term is applied to a card name / field key / field value cell:
+//  'anywhere' — the term occurs as a substring anywhere in the cell
+//  'word'     — the term occurs as a whole word (non-letter/number bounds)
+//  'exact'    — the entire cell equals the term
+// Expression mode has its own operators, so this governs plain text only.
+let searchMatchMode = 'anywhere';
+
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function cellMatches(mode, cell, term) {
+  const c = String(cell || '');
+  if (mode === 'exact') return c.trim().toLowerCase() === term.toLowerCase();
+  if (mode === 'word') {
+    const re = new RegExp(
+      '(^|[^\\p{L}\\p{N}_])(' + escapeRegExp(term) + ')(?=[^\\p{L}\\p{N}_]|$)',
+      'iu'
+    );
+    return re.test(c);
+  }
+  return c.toLowerCase().includes(term);
 }
 
 function schemeMatchesQuery(e) {
@@ -1638,6 +1664,20 @@ function schemeMatchesQuery(e) {
 // matches numbers, everything else is quoted.
 const searchClearBtn = document.getElementById('searchClearBtn');
 const exprModeBtn = document.getElementById('exprModeBtn');
+const matchModeGroup = document.getElementById('matchMode');
+
+function setMatchMode(mode) {
+  searchMatchMode = mode;
+  matchModeGroup.querySelectorAll('.match-mode-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.mode === mode));
+}
+
+matchModeGroup.addEventListener('click', e => {
+  const btn = e.target.closest('.match-mode-btn');
+  if (!btn || btn.dataset.mode === searchMatchMode) return;
+  setMatchMode(btn.dataset.mode);
+  render();
+});
 const exprPill = document.getElementById('exprPill');
 const exprPillText = document.getElementById('exprPillText');
 const exprPillExit = document.getElementById('exprPillExit');
@@ -2635,7 +2675,7 @@ function buildTableParts(maxRows) {
   const filtered = schemes.filter(s => {
     const e = getEffective(s.id);
     return (showHidden ? true : !e.hidden) &&
-      e.name.toLowerCase().includes(searchQuery.toLowerCase());
+      cellMatches(searchMatchMode, e.name, searchQuery.trim());
   });
 
   // Build flat records: [{ rowKey, colKey, rawVal, rowParts, colParts }]

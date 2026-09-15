@@ -24,6 +24,11 @@
           </button>
           <span class="search-icon" aria-hidden="true">🔍</span>
           <div class="search-tools">
+            <div class="match-mode" id="matchMode" role="group" aria-label="Search matching">
+              <button type="button" class="match-mode-btn active" data-mode="anywhere" title="Match anywhere in the text" aria-label="Match anywhere in the text">Any</button>
+              <button type="button" class="match-mode-btn" data-mode="word" title="Match whole words only" aria-label="Match whole words only">Word</button>
+              <button type="button" class="match-mode-btn" data-mode="exact" title="Match the exact text" aria-label="Match the exact text">Exact</button>
+            </div>
             <button class="search-clear hidden" id="searchClearBtn" title="Clear search" aria-label="Clear search">&times;</button>
             <button class="expr-toggle" id="exprModeBtn" title="Compose a filter expression" aria-label="Compose a filter expression">ƒx</button>
           </div>

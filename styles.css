@@ -208,7 +208,7 @@ header .btn-secondary:hover {
 
 .search-wrapper input {
   width: 100%;
-  padding: 10px 76px 10px 40px;
+  padding: 10px 190px 10px 40px;
   border: 2px solid var(--border);
   border-radius: 999px;
   /* A paper slip tucked into the leather band. */
@@ -287,6 +287,48 @@ header .btn-secondary:hover {
 .expr-toggle.active {
   background: var(--primary-light);
   color: var(--primary);
+}
+
+/* ---------- Matching mode (text search only) ---------- */
+.match-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: 3px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.match-mode-btn {
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 0.66rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 4px 7px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.match-mode-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.match-mode-btn.active {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+/* Expressions decide their own matching; the segmented control only crops
+   up in plain-text mode so the bar never shows two meanings at once. */
+.search-wrapper.mode-expr .match-mode {
+  display: none;
 }
 
 /* ---------- Active-filter pill (expression mode) ---------- */
@@ -676,6 +718,7 @@ header .btn-secondary:hover {
 
 .search-clear:focus-visible,
 .expr-toggle:focus-visible,
+.match-mode-btn:focus-visible,
 .expr-pill-x:focus-visible,
 .sh-chip:focus-visible,
 .sh-example:focus-visible {

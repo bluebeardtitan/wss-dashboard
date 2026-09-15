@@ -8,7 +8,13 @@ Search has two modes. **Text mode** matches plain text. **Expression mode** (ƒx
 
 ## Plain text
 
-Case-insensitive substring match against card names, field names, and field values.
+Case-insensitive substring match against card names, field names, and field values. A small **Any / Word / Exact** control in the search bar picks how each term is matched:
+
+- **Any** — the term occurs as a substring anywhere (`district` can hit the middle of a word or value).
+- **Word** — the term must stand on its own as a whole word, so `bore` matches `Bore Well` but not `Borewell` or `boring`. Word bounds span letters and digits in any script.
+- **Exact** — the term must equal the entire field value or card name on its own (`bore` matches a card exactly named *bore*, nothing else).
+
+Every term in the grammar below is tested under the selected mode.
 
 **Multiple terms:** spaces mean AND, `|` means OR — AND binds tighter:
 
