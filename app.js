@@ -17,13 +17,27 @@ function openDB() {
   });
 }
 
-async function dbAdd(scheme) {
+// Applies every put/add in ONE transaction: if any record fails, the whole
+// batch aborts and the store is left exactly as it was. This is what keeps
+// commit() and replace-import from ever leaving a half-written database.
+async function dbCommit({ puts = [], adds = [], clear = false }) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    const req = tx.objectStore(STORE_NAME).add(scheme);
-    req.onsuccess = () => resolve(req.result);
-    tx.onerror = () => reject(tx.error);
+    let tx;
+    try {
+      tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      if (clear) store.clear();
+      puts.forEach(r => store.put(r));
+      adds.forEach(r => store.add(r));
+    } catch (err) {
+      try { if (tx) tx.abort(); } catch (_) { /* already aborted */ }
+      reject(err);
+      return;
+    }
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || new Error('Transaction failed'));
+    tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
   });
 }
 
@@ -34,26 +48,6 @@ async function dbGetAll() {
     const req = tx.objectStore(STORE_NAME).getAll();
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(tx.error);
-  });
-}
-
-async function dbUpdate(scheme) {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    tx.objectStore(STORE_NAME).put(scheme);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-async function dbClear() {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    tx.objectStore(STORE_NAME).clear();
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
   });
 }
 
@@ -552,8 +546,12 @@ cardsContainer.addEventListener('pointerdown', e => {
   }, LONG_PRESS_MS);
 });
 
-const ESC_RE = /[&<>]/g;
-const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;' };
+// Quotes are included because esc() output is injected into HTML attributes
+// (value="…", data-*=…) as well as text nodes. Without ", a value like
+// foo"bar would terminate the attribute early and the truncated remainder
+// would be silently written back on the next save.
+const ESC_RE = /[&<>"]/g;
+const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
 function esc(str) {
   return String(str).replace(ESC_RE, c => ESC_MAP[c]);
 }
@@ -651,9 +649,9 @@ function parseLinkTargets(value) {
   return out;
 }
 
-// esc() escapes <>& but not quotes; use this for attribute values.
+// esc() now escapes quotes too; this alias remains for call-site clarity.
 function escAttr(str) {
-  return esc(str).replace(/"/g, '&quot;');
+  return esc(str);
 }
 
 function findSchemeByName(name) {
@@ -2667,7 +2665,11 @@ bulkModalSave.addEventListener('click', () => {
 // When a scheme is renamed, every → link naming it would go stale. Rewrite
 // the old name in all other schemes' link fields (base records and any
 // staged changes) so references survive the rename.
-async function propagateRenames() {
+// Returns extra records to include in the commit batch instead of writing
+// them itself — commit must stay all-or-nothing, so nothing is persisted
+// until the whole batch succeeds.
+function planRenamePropagation() {
+  const extraPuts = [];
   for (const [id, changes] of pendingChanges) {
     if (isNewId(id) || !changes.name) continue;
     const base = findScheme(id);
@@ -2703,43 +2705,71 @@ async function propagateRenames() {
       if (!fieldsRes.changed && !hiddenRes.changed) continue;
 
       if (staged) {
-        // Its own commit will persist the rewritten dicts.
+        // Its own commit record will carry the rewritten dicts.
         if (staged.fields || fieldsRes.changed) staged.fields = fieldsRes.dict;
         if (staged.hiddenFields || hiddenRes.changed) staged.hiddenFields = hiddenRes.dict;
       } else {
         const target = findScheme(s.id);
-        target.fields = fieldsRes.dict;
-        target.hiddenFields = hiddenRes.dict;
-        await dbUpdate({ ...target });
+        if (target) extraPuts.push({ ...target, fields: fieldsRes.dict, hiddenFields: hiddenRes.dict });
       }
     }
   }
+  return extraPuts;
 }
 
+let committing = false;
+
 commitBtn.addEventListener('click', async () => {
-  await propagateRenames();
-  const count = pendingChanges.size;
-  let committed = 0;
-  for (const [id, changes] of pendingChanges) {
-    const isNew = isNewId(id);
-    if (isNew) {
-      const { id: _discard, ...schemeData } = { id: 0, ...getEffective(id) };
-      delete schemeData.id;
-      const newId = await dbAdd(schemeData);
-      committed++;
-    } else {
-      const base = findScheme(id);
-      if (!base) continue;
-      const merged = { ...base, ...changes };
-      await dbUpdate(merged);
-      committed++;
+  // Re-entry guard: a second click while the batch is in flight would run
+  // the same loop twice and duplicate every new card.
+  if (committing) return;
+  committing = true;
+  commitBtn.disabled = true;
+  try {
+    const extraPuts = planRenamePropagation();
+    const puts = [];
+    const adds = [];
+    let skipped = 0;
+
+    for (const [id, changes] of pendingChanges) {
+      if (isNewId(id)) {
+        const { id: _discard, ...schemeData } = { ...getEffective(id) };
+        if (!schemeData.name) { skipped++; continue; }
+        delete schemeData.id;
+        adds.push(schemeData);
+      } else {
+        const base = findScheme(id);
+        if (!base) { skipped++; continue; }
+        puts.push({ ...base, ...changes });
+      }
     }
+    const stagedCount = puts.length + adds.length;
+
+    // Rename rewrites for cards without their own staged changes; cards that
+    // are also being committed already carry the rewrite via their staged
+    // merge above, so only add extras for ids not already in puts.
+    const putIds = new Set(puts.map(p => p.id));
+    for (const rec of extraPuts) {
+      if (putIds.has(rec.id)) continue;
+      puts.push(rec);
+    }
+
+    // One transaction: either every card commits or the database is untouched.
+    await dbCommit({ puts, adds });
+    pendingChanges.clear();
+    await loadSchemes();
+    setLocalModifiedAt();
+    exitSelectionMode();
+    showToast(`${stagedCount} change${stagedCount !== 1 ? 's' : ''} committed${skipped ? ` (${skipped} skipped)` : ''}`);
+  } catch (err) {
+    console.error(err);
+    // pendingChanges is untouched and the transaction rolled back, so the
+    // user can simply retry.
+    showToast('Commit failed — no changes were written. Please retry.');
+  } finally {
+    committing = false;
+    commitBtn.disabled = false;
   }
-  pendingChanges.clear();
-  await loadSchemes();
-  setLocalModifiedAt();
-  exitSelectionMode();
-  showToast(`${committed} change${committed !== 1 ? 's' : ''} committed`);
 });
 
 discardBtn.addEventListener('click', () => {
@@ -3084,13 +3114,26 @@ function getExportData() {
 }
 
 async function importSchemesData(data, replaceMode) {
-  if (!Array.isArray(data) || !data.every(s => s.name)) {
-    alert('Invalid format: expected an array of objects with at least a "name" property.');
+  if (!Array.isArray(data) || data.length === 0 || !data.every(s => s && typeof s === 'object' && s.name)) {
+    alert('Invalid format: expected a non-empty array of objects with at least a "name" property.');
     return false;
   }
-  if (replaceMode) await dbClear();
-  for (const s of data) {
-    await dbAdd(normalizeScheme(s));
+  // An import replaces the whole store; staged edits reference card ids that
+  // will no longer exist afterwards (and staged _new_N cards would be wiped
+  // from memory by the reload, then committed later as empty junk records).
+  if (pendingChanges.size > 0) {
+    alert(`You have ${pendingChanges.size} uncommitted change(s). Commit or discard them before importing.`);
+    return false;
+  }
+  // Clearing and re-adding in one transaction: any bad record aborts the
+  // whole import instead of leaving the database emptied or half-written.
+  const records = data.map(normalizeScheme);
+  try {
+    await dbCommit(replaceMode ? { puts: [], adds: records, clear: true } : { adds: records });
+  } catch (err) {
+    console.error(err);
+    alert('Import failed — the existing data was left unchanged.');
+    return false;
   }
   await loadSchemes();
   setLocalModifiedAt();
@@ -3107,14 +3150,22 @@ function exportJSON() {
 function importJSON(file) {
   const reader = new FileReader();
   reader.onload = async e => {
+    let data;
     try {
-      const data = JSON.parse(e.target.result);
-      const mode = confirm('Click OK to replace all data, or Cancel to append to existing data.');
-      if (await importSchemesData(data, mode)) {
-        showToast(`Imported ${data.length} card${data.length !== 1 ? 's' : ''}`);
-      }
+      data = JSON.parse(e.target.result);
     } catch (err) {
       alert('Failed to parse JSON file: ' + err.message);
+      return;
+    }
+    // Validate BEFORE asking "replace or append" so a wrong/garbage file can
+    // never tempt the user into confirming a wipe that then half-fails.
+    if (!Array.isArray(data) || data.length === 0 || !data.every(s => s && typeof s === 'object' && s.name)) {
+      alert('Invalid format: expected a non-empty array of objects with at least a "name" property.');
+      return;
+    }
+    const mode = confirm('Click OK to replace all data, or Cancel to append to existing data.');
+    if (await importSchemesData(data, mode)) {
+      showToast(`Imported ${data.length} card${data.length !== 1 ? 's' : ''}`);
     }
   };
   reader.readAsText(file);
@@ -3236,6 +3287,13 @@ function getRedirectUri() {
 }
 
 function oauthSignIn() {
+  // Signing in submits a form that navigates the page away, which silently
+  // discards every staged (uncommitted) change. Refuse unless nothing is
+  // staged so no work can be lost.
+  if (pendingChanges.size > 0) {
+    alert(`You have ${pendingChanges.size} uncommitted change(s). Commit or discard them before signing in — signing in reloads the page and would lose them.`);
+    return;
+  }
   const clientId = getDriveClientId();
 
   const form = document.createElement('form');
@@ -3437,7 +3495,12 @@ async function syncPush(folderId, driveMeta, baseVersion) {
 
 async function syncPull(folderId, driveMeta, driveVersion) {
   const data = await driveDownload(DRIVE_BACKUP_FILE, folderId);
-  await importSchemesData(data, true);
+  const ok = await importSchemesData(data, true);
+  // importSchemesData already guards against invalid data and pending
+  // changes; if it bailed out, keep local state intact and DO NOT advance
+  // the sync markers — marking this as synced would let a later push
+  // overwrite the Drive backup with local data that never got pulled.
+  if (!ok) throw new Error('Import of Drive backup was rejected; sync aborted.');
   await driveWriteVersion(folderId, buildVersionMeta(driveVersion, 'pull', driveMeta));
   setLastSyncState(driveVersion);
 }
@@ -3466,6 +3529,15 @@ dataDriveSync.addEventListener('click', async () => {
         await syncPull(folderId, null, 1);
         showToast('Downloaded existing Drive backup (baseline v1)');
       } else {
+        // Uploading a new baseline overwrites the existing Drive backup in
+        // place. Preserve the old copy as a revision first so that choosing
+        // "upload local" can never silently destroy the only Drive copy.
+        try {
+          const legacyData = await driveDownload(DRIVE_BACKUP_FILE, folderId);
+          await driveSaveRevision(legacyData, 'baseline-replaced');
+        } catch (preserveErr) {
+          console.error('Failed to preserve legacy Drive backup before baseline push:', preserveErr);
+        }
         await syncPush(folderId, null, 0);
         showToast('Uploaded local data as baseline (v1)');
       }
@@ -3530,6 +3602,17 @@ document.addEventListener('click', e => {
 // ========== Init ==========
 extractTokenFromHash();
 loadSchemes();
+
+// Any staged (uncommitted) change is memory-only; leaving the page — tab
+// close, refresh, Google sign-in — would drop it silently. Warn when there
+// is pending work that would be lost.
+window.addEventListener('beforeunload', e => {
+  if (pendingChanges.size > 0) {
+    e.preventDefault();
+    e.returnValue = '';
+    return '';
+  }
+});
 
 // Keyboard shortcut: Ctrl+K focuses search (or opens the expression editor
 // while a filter is active), Escape exits
