@@ -267,6 +267,10 @@ const copyFromPicklist = document.getElementById('copyFromPicklist');
 const copyPicklistBody = document.getElementById('copyPicklistBody');
 const copyPickAll = document.getElementById('copyPickAll');
 const copyFromBtn = document.getElementById('copyFromBtn');
+const matchOrderBtn = document.getElementById('matchOrderBtn');
+const orderPreview = document.getElementById('orderPreview');
+const orderNote = document.getElementById('orderNote');
+const copyModeTabs = document.querySelectorAll('.copy-mode-tab');
 
 // Pending
 const pendingBar = document.getElementById('pendingBar');
@@ -775,6 +779,7 @@ function openModal(scheme = null) {
   copySuggest.innerHTML = '';
   copySuggest.classList.add('hidden');
   copyFromPicklist.classList.add('hidden');
+  setCopyMode('copy');
 
   schemeModal.classList.remove('hidden');
   setTimeout(() => schemeNameInput.focus(), 100);
@@ -967,10 +972,185 @@ copyFromBtn.addEventListener('click', () => {
   });
 
   showToast(`Copied ${checkedFieldKeys.size} field(s) from "${source.name}"`);
+  resetCopyFrom();
+});
+
+// ---------- Copy-from: match field order ----------
+copyModeTabs.forEach(tab => {
+  tab.addEventListener('click', () => setCopyMode(tab.dataset.mode));
+});
+
+function setCopyMode(mode) {
+  copyModeTabs.forEach(t => t.classList.toggle('is-active', t.dataset.mode === mode));
+  copyFromPicklist.querySelectorAll('.copy-pane').forEach(p => p.classList.toggle('hidden', p.dataset.pane !== mode));
+  if (mode === 'order') renderOrderPreview();
+}
+
+function resetCopyFrom() {
   copyFromSelect.value = '';
   copyFromInput.value = '';
   copySuggest.classList.add('hidden');
   copyFromPicklist.classList.add('hidden');
+  setCopyMode('copy');
+}
+
+// Stored key for a field row, mirroring parseFieldRows (link → "→ label",
+// tag → "#name", plain → name).
+function rowKey(row) {
+  const input = row.querySelector('.field-key-input');
+  if (!input) return '';
+  let k = input.value.trim();
+  if (!k) return '';
+  if (row.classList.contains('link-row')) {
+    if (!isLinkKey(k)) k = '→ ' + k;
+  } else if (row.classList.contains('tag-row')) {
+    k = '#' + k.replace(/^#+\s*/, '');
+  } else {
+    k = k.replace(/^#+\s*/, '');
+  }
+  return k;
+}
+
+// Ordered layout plan of a source card: grouped fields follow their groups,
+// then any remaining fields in insertion order.
+function buildTargetPlan(source) {
+  const fields = source.fields || {};
+  const groups = source.groups || [];
+  const inGroup = new Set();
+  const seen = new Set();
+  const plan = [];
+  groups.forEach(g => {
+    const gFields = (g.fields || []).filter(k => !seen.has(k) && fields[k] !== undefined);
+    if (gFields.length === 0) return;
+    plan.push({ type: 'group', name: g.name });
+    gFields.forEach(k => { seen.add(k); inGroup.add(k); plan.push({ type: 'field', key: k }); });
+  });
+  Object.keys(fields).forEach(k => {
+    if (!seen.has(k)) plan.push({ type: 'field', key: k });
+  });
+  return plan;
+}
+
+// Reorder the open form's rows so existing fields line up like the source
+// card. Duplicate rows are keyed together and stay one contiguous block, so
+// fields that share a name never get pulled apart. Rows (and hidden fields)
+// without a counterpart on the source card keep their relative order.
+function applyOrderToForm(source) {
+  const plan = buildTargetPlan(source);
+  const children = Array.from(dynamicFields.children);
+
+  const groupByName = new Map();
+  children.forEach(row => {
+    if (!row.classList.contains('dynamic-group-row')) return;
+    const nameInput = row.querySelector('.group-name-input');
+    const name = nameInput ? nameInput.value.trim() : '';
+    if (name && !groupByName.has(name)) groupByName.set(name, row);
+  });
+
+  const byKey = new Map();
+  children.forEach(row => {
+    if (!row.classList.contains('dynamic-field-row') || row.dataset.isHidden === 'true') return;
+    const k = rowKey(row);
+    if (!k) return;
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k).push(row);
+  });
+
+  const used = new Set();
+  const usedGroups = new Set();
+  const ordered = [];
+
+  plan.forEach(entry => {
+    if (entry.type === 'group') {
+      if (usedGroups.has(entry.name)) return;
+      const gr = groupByName.get(entry.name);
+      if (gr) {
+        usedGroups.add(entry.name);
+        used.add(gr);
+        ordered.push(gr);
+      }
+      return;
+    }
+    const q = byKey.get(entry.key);
+    if (q && q.length) {
+      q.forEach(row => {
+        used.add(row);
+        ordered.push(row);
+      });
+      byKey.set(entry.key, []);
+    }
+  });
+
+  children.forEach(row => {
+    if (!used.has(row)) ordered.push(row);
+  });
+  ordered.forEach(row => dynamicFields.appendChild(row));
+}
+
+// Preview ribbon for the "Match field order" tab: numbered slots show where
+// each existing field lands, muted slots are source fields missing from this
+// card, and the tail lists fields that keep their current place.
+function renderOrderPreview() {
+  const sourceId = copyFromSelect.value;
+  const source = sourceId ? getEffective(sourceId) : null;
+  if (!source) {
+    orderNote.textContent = 'Search and pick a card above to preview its field order.';
+    orderPreview.innerHTML = '';
+    return;
+  }
+
+  const plan = buildTargetPlan(source);
+  const targetKeys = plan.filter(e => e.type === 'field').map(e => e.key);
+  const targets = new Set(targetKeys);
+  const counts = new Map();
+  Array.from(dynamicFields.children).forEach(row => {
+    if (!row.classList.contains('dynamic-field-row') || row.dataset.isHidden === 'true') return;
+    const k = rowKey(row);
+    if (!k) return;
+    counts.set(k, (counts.get(k) || 0) + 1);
+  });
+  const dupCount = Array.from(counts.values()).filter(c => c > 1).length;
+  const keptKeys = Array.from(counts.keys()).filter(k => !targets.has(k));
+
+  let matched = 0;
+  let slot = 1;
+  let html = '';
+  plan.forEach(entry => {
+    if (entry.type === 'group') {
+      html += `<span class="order-chip order-chip-group" title="Group: ${esc(entry.name)}">📁 ${esc(entry.name)}</span>`;
+      return;
+    }
+    const n = counts.get(entry.key) || 0;
+    if (n > 0) {
+      html += `<span class="order-chip" title="${esc(entry.key)}"><b>${slot}</b>${esc(entry.key)}${n > 1 ? `<i>×${n}</i>` : ''}</span>`;
+      slot += 1;
+      matched += 1;
+    } else {
+      html += `<span class="order-chip order-chip-ghost" title="${esc(entry.key)} — not on this card">${esc(entry.key)}</span>`;
+    }
+  });
+  if (keptKeys.length > 0) {
+    html += `<span class="order-ribbon-divider">Keeps its place</span>`;
+    keptKeys.forEach(k => {
+      html += `<span class="order-chip order-chip-kept" title="${esc(k)}">${esc(k)}${counts.get(k) > 1 ? `<i>×${counts.get(k)}</i>` : ''}</span>`;
+    });
+  }
+
+  const dupNote = dupCount > 0
+    ? ` ${dupCount} duplicate name${dupCount > 1 ? 's' : ''} stay${dupCount > 1 ? '' : 's'} paired in current order.`
+    : '';
+  orderNote.innerHTML = `Arranges <b>${matched}</b> field${matched !== 1 ? 's' : ''}${keptKeys.length ? `, keeps <b>${keptKeys.length}</b> as-is` : ''}.${dupNote}`;
+  orderPreview.innerHTML = html;
+}
+
+matchOrderBtn.addEventListener('click', () => {
+  const sourceId = copyFromSelect.value;
+  if (!sourceId) { showToast('Select a card first'); return; }
+  const source = getEffective(sourceId);
+  if (!source) return;
+  applyOrderToForm(source);
+  resetCopyFrom();
+  showToast(`Fields reordered to match "${source.name}"`);
 });
 
 function renderHiddenFieldsToggle(hiddenCount) {

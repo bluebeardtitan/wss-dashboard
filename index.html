@@ -83,24 +83,40 @@
           <div class="field-label">Custom Fields</div>
           <div class="copy-from-section" id="copyFromSection">
             <div class="copy-from-header">
-              <label>Copy from:</label>
+              <div class="copy-from-meta">
+                <span class="copy-from-eyebrow">Reuse content</span>
+                <span class="copy-from-hint">Pull fields from another card, or match its field order.</span>
+              </div>
               <div class="copy-from-picker" id="copyFromPicker">
                 <input type="text" class="copy-from-input" id="copyFromInput"
-                       placeholder="Search cards to copy fields from…" autocomplete="off" spellcheck="false" />
+                       placeholder="Search cards…" autocomplete="off" spellcheck="false" />
                 <input type="hidden" id="copyFromSelect" value="" />
                 <div class="copy-suggest hidden" id="copySuggest"></div>
               </div>
             </div>
             <div class="copy-from-picklist hidden" id="copyFromPicklist">
-              <div class="copy-picklist-header">
-                <label class="copy-pick-item copy-pick-all">
-                  <input type="checkbox" id="copyPickAll" />
-                  <span>Select all</span>
-                </label>
+              <div class="copy-mode-tabs" role="tablist" aria-label="Choose how to reuse fields">
+                <button type="button" class="copy-mode-tab is-active" data-mode="copy" role="tab" aria-selected="true">Copy fields</button>
+                <button type="button" class="copy-mode-tab" data-mode="order" role="tab" aria-selected="false">Match field order</button>
               </div>
-              <div class="copy-picklist-body" id="copyPicklistBody"></div>
-              <div class="copy-from-actions">
-                <button class="btn btn-sm btn-primary" id="copyFromBtn">Copy Selected</button>
+              <div class="copy-pane" data-pane="copy">
+                <div class="copy-picklist-header">
+                  <label class="copy-pick-item copy-pick-all">
+                    <input type="checkbox" id="copyPickAll" />
+                    <span>Select all</span>
+                  </label>
+                </div>
+                <div class="copy-picklist-body" id="copyPicklistBody"></div>
+                <div class="copy-from-actions">
+                  <button class="btn btn-sm btn-primary" id="copyFromBtn">Copy selected</button>
+                </div>
+              </div>
+              <div class="copy-pane hidden" data-pane="order">
+                <div class="order-note" id="orderNote"></div>
+                <div class="order-preview" id="orderPreview"></div>
+                <div class="copy-from-actions">
+                  <button class="btn btn-sm btn-primary" id="matchOrderBtn">Reorder fields</button>
+                </div>
               </div>
             </div>
           </div>
