@@ -878,6 +878,18 @@ copyFromSelect.addEventListener('change', () => {
   const sourceFields = source.fields || {};
   const sourceGroups = source.groups || [];
   const groupedKeys = new Set(sourceGroups.flatMap(g => g.fields || []));
+
+  // Keys already present on the current card (visible or hidden). Source
+  // fields without a match would be added as new rows, so they get a
+  // "New" mark while everything else reads as a value overwrite.
+  const currentKeys = new Set();
+  Array.from(dynamicFields.children).forEach(row => {
+    if (!row.classList.contains('dynamic-field-row')) return;
+    const k = rowKey(row);
+    if (k) currentKeys.add(k);
+  });
+  const newMark = k => currentKeys.has(k) ? '' : '<span class="copy-pick-new-badge" title="Not on this card yet">New</span>';
+
   let html = '';
 
   sourceGroups.forEach(g => {
@@ -889,9 +901,9 @@ copyFromSelect.addEventListener('change', () => {
       <span>📁 ${esc(g.name)}</span>
     </label>`;
     gFields.forEach(k => {
-      html += `<label class="copy-pick-item copy-pick-field">
+      html += `<label class="copy-pick-item copy-pick-field${currentKeys.has(k) ? '' : ' is-new'}">
         <input type="checkbox" class="copy-pick-field-cb" data-key="${esc(k)}" data-group="${esc(g.name)}" />
-        <span>${esc(k)}: <em>${esc(sourceFields[k])}</em></span>
+        <span>${esc(k)}: <em>${esc(sourceFields[k])}</em></span>${newMark(k)}
       </label>`;
     });
     html += `</div>`;
@@ -900,9 +912,9 @@ copyFromSelect.addEventListener('change', () => {
   const ungrouped = Object.entries(sourceFields).filter(([k]) => !groupedKeys.has(k));
   if (ungrouped.length > 0) {
     ungrouped.forEach(([k, v]) => {
-      html += `<label class="copy-pick-item copy-pick-field">
+      html += `<label class="copy-pick-item copy-pick-field${currentKeys.has(k) ? '' : ' is-new'}">
         <input type="checkbox" class="copy-pick-field-cb" data-key="${esc(k)}" />
-        <span>${esc(k)}: <em>${esc(v)}</em></span>
+        <span>${esc(k)}: <em>${esc(v)}</em></span>${newMark(k)}
       </label>`;
     });
   }
