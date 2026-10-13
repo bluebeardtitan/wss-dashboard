@@ -30,7 +30,7 @@
               <button type="button" class="match-mode-btn" data-mode="exact" title="Match the exact text" aria-label="Match the exact text">Exact</button>
             </div>
             <button class="search-clear hidden" id="searchClearBtn" title="Clear search" aria-label="Clear search">&times;</button>
-            <button class="expr-toggle" id="exprModeBtn" title="Compose a filter expression" aria-label="Compose a filter expression">ƒx</button>
+            <button class="expr-toggle" id="exprModeBtn" title="Find schemes with filters" aria-label="Find schemes with filters">ƒx</button>
           </div>
         </div>
       </div>
@@ -347,27 +347,69 @@
     </div>
   </div>
 
-  <!-- Query Editor Modal (expression filter) -->
+  <!-- Find / Filter Modal: guided builder (default) + advanced expression -->
   <div id="queryModal" class="modal-overlay hidden">
     <div class="modal modal-lg query-modal">
       <div class="modal-header">
-        <h2>ƒx Filter Expression</h2>
+        <h2 id="queryModalTitle">Find schemes</h2>
         <button class="modal-close" id="queryModalClose">&times;</button>
       </div>
       <div class="modal-body">
-        <div class="expr-status" id="exprStatus"></div>
-        <div class="expr-editor-wrap" id="exprEditorWrap">
-          <textarea id="exprInput" class="expr-input" rows="3" spellcheck="false"
-                    placeholder='e.g. Status == "Done" and Demand(MLD) > 100' aria-label="Filter expression"></textarea>
-          <div class="search-suggest in-modal hidden" id="exprSuggest" role="listbox" aria-label="Expression suggestions"></div>
+
+        <!-- Simple: plain-language builder. This is the default experience. -->
+        <div id="simplePanel">
+          <div class="simple-search">
+            <label for="simpleSearchInput" class="simple-search-label">Search all card text</label>
+            <input type="text" id="simpleSearchInput" class="simple-search-input"
+                   placeholder="e.g. tank, Ward 5, Completed" autocomplete="off" spellcheck="false" />
+            <p class="simple-help">Looks in card names, field names and field values. Leave blank to use only the filters below.</p>
+          </div>
+
+          <div class="simple-filters-head">
+            <span class="simple-filters-title">Filters</span>
+            <div class="simple-match" id="simpleMatchGroup" role="group" aria-label="How to combine the filters">
+              <button type="button" class="simple-match-btn active" data-match="all" aria-pressed="true">Match all</button>
+              <button type="button" class="simple-match-btn" data-match="any" aria-pressed="false">Match any</button>
+            </div>
+          </div>
+          <div id="simpleFilters" class="simple-filters"></div>
+          <div class="simple-filter-actions">
+            <button type="button" class="btn btn-sm btn-outline" id="addFilterBtn">+ Add a filter</button>
+            <button type="button" class="btn btn-sm btn-outline" id="clearFiltersBtn">Clear all</button>
+          </div>
+
+          <div class="simple-examples">
+            <span class="simple-examples-label">Examples</span>
+            <div class="simple-chips" id="simpleExamples"></div>
+          </div>
+
+          <div class="simple-status" id="simpleStatus" role="status" aria-live="polite"></div>
         </div>
-        <p class="expr-hint"><kbd>Enter</kbd> accept suggestion · <kbd>Ctrl+Enter</kbd> apply filter · <kbd>Esc</kbd> close</p>
-        <div class="query-sections" id="querySections"></div>
+
+        <!-- Advanced: the raw expression editor. Behaviour is unchanged. -->
+        <div id="advancedPanel" class="hidden">
+          <div class="expr-status" id="exprStatus"></div>
+          <div class="expr-editor-wrap" id="exprEditorWrap">
+            <textarea id="exprInput" class="expr-input" rows="3" spellcheck="false"
+                      placeholder='e.g. Status == "Done" and Demand(MLD) > 100' aria-label="Filter expression"></textarea>
+            <div class="search-suggest in-modal hidden" id="exprSuggest" role="listbox" aria-label="Expression suggestions"></div>
+          </div>
+          <p class="expr-hint"><kbd>Enter</kbd> accept suggestion · <kbd>Ctrl+Enter</kbd> apply filter · <kbd>Esc</kbd> close</p>
+          <div class="query-sections" id="querySections"></div>
+        </div>
+
       </div>
-      <div class="modal-footer">
-        <button class="btn btn-outline hidden" id="exprRemoveBtn">Remove filter</button>
-        <button class="btn btn-secondary" id="exprCancelBtn">Cancel</button>
-        <button class="btn btn-primary" id="exprApplyBtn">Apply Filter</button>
+      <div class="modal-footer query-footer">
+        <div class="query-mode-switch">
+          <button type="button" class="query-mode-link" id="advancedToggle">Advanced: write an expression</button>
+          <button type="button" class="query-mode-link hidden" id="simpleToggle">← Back to simple filters</button>
+          <span class="query-roundtrip-note hidden" id="queryRoundTripNote"></span>
+        </div>
+        <div class="query-footer-actions">
+          <button class="btn btn-outline hidden" id="exprRemoveBtn">Remove filter</button>
+          <button class="btn btn-secondary" id="exprCancelBtn">Cancel</button>
+          <button class="btn btn-primary" id="exprApplyBtn">Apply</button>
+        </div>
       </div>
     </div>
   </div>

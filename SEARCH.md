@@ -1,37 +1,60 @@
 # Search guide
 
-Search has two modes. **Text mode** matches plain text. **Expression mode** (ƒx) filters with logical expressions.
+There are two ways to find schemes:
 
-- Type normally in the search box for text matching — nothing is compiled, so `done & wip` finds that literal text.
-- Press the **ƒx** button to compose an expression in the filter editor: a live match count, your fields, operators, and examples are all one click away there. Applying it puts the header into expression mode and shows the filter as a pill; click the pill to edit it again, or its × to remove the filter.
-- The two modes each remember their own query — switching between them swaps filters without losing either.
+- **Text search** — the box in the header. Type plain words; they are matched against card names, field names and field values. Nothing is compiled, so `done & wip` finds that literal text.
+- **Filters** — press the **ƒx** button (or **Ctrl/Cmd+K**) to open the *Find schemes* dialog. It opens in the guided **Simple** view by default; power users can flip to **Advanced** to write a raw expression.
 
-## Plain text
+The two remember their own query, so switching between them never loses either. When a filter is applied the header shows a pill naming it — click the pill to edit, or its × to remove the filter.
 
-Case-insensitive substring match against card names, field names, and field values. A small **Any / Word / Exact** control in the search bar picks how each term is matched:
+---
 
-- **Any** — the term occurs as a substring anywhere (`district` can hit the middle of a word or value).
-- **Word** — the term must stand on its own as a whole word, so `bore` matches `Bore Well` but not `Borewell` or `boring`. Word bounds span letters and digits in any script.
-- **Exact** — the term must equal the entire field value or card name on its own (`bore` matches a card exactly named *bore*, nothing else).
+## Simple filters (default)
 
-Every term in the grammar below is tested under the selected mode.
+A plain-language builder. Fill in the search box, add one or more filter rows, and watch the live count at the bottom.
 
-**Multiple terms:** spaces mean AND, `|` means OR — AND binds tighter:
+### The search box
 
-| Query | Meaning |
+Looks in **card names, field names and field values**, exactly like the header's text search. Its grammar is the same too: spaces mean **AND**, and `|` means **OR**.
+
+| You type | It means |
 | --- | --- |
-| `pump` | contains "pump" |
+| `tank` | contains "tank" |
 | `pump north` | "pump" AND "north" |
 | `pump \| tank` | "pump" OR "tank" |
-| `pump north \| intake` | ("pump" AND "north") OR "intake" |
 
-Terms match anywhere — a term like `district` can hit a field's name rather than its value. Stray separators are ignored (`pump \|` equals `pump`), and an empty query shows everything.
+Leave it blank to filter with rows only, or use it together with rows (the box and the rows are combined with AND).
 
-Text mode never compiles expressions: `done & wip` finds that literal text. For real filtering logic, switch to expression mode with the ƒx button.
+### Filter rows
 
-## Expressions
+Each row is **field → condition → value**:
 
-In expression mode every query is compiled as a filtrex expression and tested against every visible card. Only cards where it evaluates to exactly `true` are shown.
+- **Field** — pick from the fields that exist in your data. *Card name* is offered so you can filter the card's own name like any field.
+- **Condition** — `contains`, `is exactly`, `is not`, `starts with`, `is empty`, `is not empty`. Number fields (columns that are mostly numbers) also get `is greater than`, `is less than` and `is between`.
+- **Value** — free text; existing values from your data are suggested as you type (via a datalist, so a slightly different value still works).
+
+The two empty checks (`is empty` / `is not empty`) need no value and are the reliable way to find blank or missing fields.
+
+### Match all vs Match any
+
+The toggle above the rows controls how rows combine:
+
+- **Match all** (default) — every row must be true (AND).
+- **Match any** — at least one row must be true (OR).
+
+### Case and typing, in plain terms
+
+The builder's text conditions (`contains`, `is exactly`, `is not`, `starts with`) **ignore capitalisation** — `done` matches *Done*, *DONE* and *done*. This is intentionally friendlier than Advanced mode, where `==` is exact. Number conditions compare as real numbers, so `is greater than 400` works whether the stored value is `400` or `"400"`.
+
+### Switching to Advanced
+
+The **Advanced: write an expression** link turns your current filters into the equivalent expression and drops you into the expression editor — a good way to learn the syntax. The **← Back to simple filters** link tries to read the expression back into rows. If the expression uses anything the builder can't represent, nothing is lost: it stays as-is and a note explains why it can't be simplified.
+
+---
+
+## Advanced expressions
+
+Every query in Advanced mode is compiled as a [filtrex](https://github.com/joewalnes/filtrex) expression and tested against every visible card. Only cards where it evaluates to exactly `true` are shown. Advanced is also where legacy/hand-written filters live, so it behaves exactly as it always has.
 
 ### Referring to fields
 
@@ -65,7 +88,13 @@ In expression mode every query is compiled as a filtrex expression and tested ag
 
 `abs` `ceil` `floor` `log` `log2` `log10` `max` `min` `round` `sqrt`
 
-Two exist specifically for data checking:
+The generated Simple filters also use case-insensitive helpers — `icontains`, `istartsWith`, `iequals`, `inotequals` — which you can reuse by hand if you want the builder's "ignore capitals" behaviour inside a written expression:
+
+```
+iequals(field:"Status", "done")
+```
+
+Two built-ins exist specifically for data checking:
 
 - `exists(field:"Notes")` — true when the field is present and not null.
 - `empty(field:"Notes")` — true when missing, blank, or an empty array. Combine with `not`: `not empty(field:"Phone")`.
@@ -93,7 +122,7 @@ not (field:"Scheme Dropped" ~= "^[Tt][Rr][Uu][Ee]$")
 - A comparison against a missing or blank field is false, not an error. Use `exists()` or `empty()` when you need to distinguish those cases.
 - Ordering comparisons (`>` `<` and friends) reject text: `Status > "A"` matches nothing because "Completed" is not a number. Use `==`, `in`, or `~=` for text.
 
-## Examples
+### Examples
 
 ```
 field:"Demand(MLD)" > 400 and field:"No. of Villages" < 2
@@ -106,7 +135,7 @@ if field:"Status" == "Done" then field:"Cost" < 500 else false
 max(field:"Phase 1", field:"Phase 2") >= 3
 ```
 
-## Matching a list of values
+### Matching a list of values
 
 To find cards where a field equals any of several values, use `in` with unquoted numeric literals (stored values that look like numbers are read as numbers):
 
@@ -122,10 +151,33 @@ field:"Scheme Code" ~= "11045|20145|45065"
 
 Quoted literals fail with `in` for numeric fields: `in ("11045", ...)` compares text against the number 11045 and never matches.
 
-## When a query is invalid
+### When a query is invalid
 
 An expression that fails to compile cannot be applied — the editor's status line explains and the Apply button stays disabled. An invalid filter already active (for example after data changes) marks the search bar red and appends "— invalid expression" to the results line; nothing matches until it is fixed or removed. Runtime problems (for example a regex that never finishes) simply exclude that card instead of breaking the list.
 
-## Where search applies
+---
+
+## Plain text search (header)
+
+Case-insensitive substring match against card names, field names, and field values. A small **Any / Word / Exact** control in the search bar picks how each term is matched:
+
+- **Any** — the term occurs as a substring anywhere (`district` can hit the middle of a word or value).
+- **Word** — the term must stand on its own as a whole word, so `bore` matches `Bore Well` but not `Borewell` or `boring`. Word bounds span letters and digits in any script.
+- **Exact** — the term must equal the entire field value or card name on its own (`bore` matches a card exactly named *bore*, nothing else).
+
+Every term in the grammar below is tested under the selected mode.
+
+**Multiple terms:** spaces mean AND, `|` means OR — AND binds tighter:
+
+| Query | Meaning |
+| --- | --- |
+| `pump` | contains "pump" |
+| `pump north` | "pump" AND "north" |
+| `pump \| tank` | "pump" OR "tank" |
+| `pump north \| intake` | ("pump" AND "north") OR "intake" |
+
+Terms match anywhere — a term like `district` can hit a field's name rather than its value. Stray separators are ignored (`pump \|` equals `pump`), and an empty query shows everything.
+
+### Where search applies
 
 The active filter drives the card list, Select All while in selection mode, and the table generated from the Table modal — all three operate on the same matching set.

@@ -371,8 +371,8 @@ function updatePendingBar() {
 function render() {
   const visibleSchemes = getVisibleSchemes();
   const filtered = visibleSchemes.filter(s => schemeMatchesQuery(getEffective(s.id)));
-  const exprActive = searchMode === 'expr';
-  const exprInvalid = exprActive && !!exprFilter && isExprInvalid(exprFilter);
+  const filterActive = searchMode === 'expr' || searchMode === 'simple';
+  const exprInvalid = filterActive && !!exprFilter && isExprInvalid(exprFilter);
   searchWrapper.classList.toggle('search-invalid', exprInvalid);
   syncHeaderChrome();
   invalidateSearchSchema();
@@ -385,7 +385,8 @@ function render() {
   const newPending = [...pendingChanges.keys()].filter(isNewId).length;
   const totalPending = pendingCount + newPending;
 
-  statsBar.textContent = `${filtered.length} of ${visibleSchemes.length} card${visibleSchemes.length !== 1 ? 's' : ''}${showHidden && hiddenCount ? ` (${hiddenCount} hidden)` : ''}${totalPending ? ` — ${totalPending} unsaved` : ''}${exprActive ? ' — ƒx filter' : ''}${exprInvalid ? ' — invalid expression' : ''}`;
+  const modeNote = searchMode === 'expr' ? ' — ƒx filter' : searchMode === 'simple' ? ' — filters' : '';
+  statsBar.textContent = `${filtered.length} of ${visibleSchemes.length} card${visibleSchemes.length !== 1 ? 's' : ''}${showHidden && hiddenCount ? ` (${hiddenCount} hidden)` : ''}${totalPending ? ` — ${totalPending} unsaved` : ''}${modeNote}${exprInvalid ? ' — invalid expression' : ''}`;
 
   updatePendingBar();
 
@@ -397,7 +398,9 @@ function render() {
       : 'No matching cards';
     emptyState.querySelector('p').textContent = visibleSchemes.length === 0
       ? 'Click "Add Card" to create your first card.'
-      : 'Try a different search term.';
+      : (filterActive
+        ? 'Try removing a filter or checking the spelling.'
+        : 'Try a different search term.');
     return;
   }
 
@@ -1731,6 +1734,19 @@ function lookupExprField(fields, name) {
 let exprCurrentFields = {};
 const exprCache = new Map();
 
+// Pseudo-field exposing a record's whole searchable text (card name + field
+// keys + values) to Simple-mode queries. Generated Simple filters use it for
+// the free-text box, so one expression can represent both the text search and
+// the filter rows — which is what lets Simple round-trip to Advanced without
+// losing the typed query. The name is unlikely to collide with a real field.
+const BUILDER_TEXT_KEY = '__builder_text__';
+
+function builderSearchBlob(e) {
+  const parts = [String(e.name || '')];
+  for (const [k, v] of Object.entries(e.fields || {})) { parts.push(k); parts.push(String(v)); }
+  return parts.join('\n');
+}
+
 // Compiles the query as a filtrex expression: { fn } on success,
 // { invalid: true } on syntax errors. Only called in expression mode —
 // text mode never compiles.
@@ -1741,7 +1757,18 @@ function compileSearchQuery(q) {
   try {
     result = {
       fn: window.filtrex.compileExpression(preprocessExprQuery(q), {
-        extraFunctions: { __field: name => lookupExprField(exprCurrentFields, name) },
+        extraFunctions: {
+          __field: name => lookupExprField(exprCurrentFields, name),
+          // Case-insensitive text helpers used only by generated Simple-mode
+          // queries. Exposing them as functions keeps every user value a
+          // plain string literal, so quotes, parentheses and non-ASCII
+          // characters in a value can never break the expression the way a
+          // hand-assembled regex could.
+          icontains: (a, b) => String(a == null ? '' : a).toLowerCase().includes(String(b == null ? '' : b).toLowerCase()),
+          istartsWith: (a, b) => String(a == null ? '' : a).toLowerCase().startsWith(String(b == null ? '' : b).toLowerCase()),
+          iequals: (a, b) => String(a == null ? '' : a).toLowerCase() === String(b == null ? '' : b).toLowerCase(),
+          inotequals: (a, b) => String(a == null ? '' : a).toLowerCase() !== String(b == null ? '' : b).toLowerCase()
+        },
         customProp: (name, get, obj) =>
           obj && Object.prototype.hasOwnProperty.call(obj, name)
             ? obj[name]
@@ -1760,16 +1787,24 @@ function compileSearchQuery(q) {
 // 'text': substring across the name, field keys and values — nothing is
 // compiled. 'expr': exprFilter (composed in the query editor modal) always
 // evaluates as filtrex, even bare words, because the user chose this mode.
-// Each mode keeps its own query; switching swaps between them without loss.
+// 'simple': the guided builder compiled exprFilter into an expression that
+// must evaluate true — used by the plain-language filter modal. text and expr
+// each keep their own query; simple reuses exprFilter (it holds the generated
+// expression) and keeps its own builder state alongside.
+// Switching swaps between them without loss.
 let searchMode = 'text';
 let exprFilter = '';
 
 function evalCompiledExpr(compiled, e) {
-  exprCurrentFields = e.fields || {};
+  // Expose the record's searchable text under BUILDER_TEXT_KEY so the
+  // generated Simple query can scan it; field-name lookups still resolve from
+  // the record's own fields.
+  const scope = Object.assign({}, e.fields || {}, { [BUILDER_TEXT_KEY]: builderSearchBlob(e) });
+  exprCurrentFields = scope;
   // filtrex returns runtime errors as truthy Error objects; only a real
   // boolean true counts as a match.
   try {
-    return compiled.fn(Object.assign({}, e.fields, { name: e.name })) === true;
+    return compiled.fn(Object.assign({}, scope, { name: e.name })) === true;
   } catch (err) {
     return false;
   }
@@ -1831,7 +1866,9 @@ function cellMatches(mode, cell, term) {
 }
 
 function schemeMatchesQuery(e) {
-  if (searchMode === 'expr') {
+  // Advanced and Simple both apply a compiled expression; Simple's is
+  // generated from the builder, Advanced's is typed by the user.
+  if (searchMode === 'expr' || searchMode === 'simple') {
     if (!exprFilter) return true;
     const compiled = compileSearchQuery(exprFilter);
     if (!compiled || compiled.invalid) return false;
@@ -1880,6 +1917,20 @@ const querySections = document.getElementById('querySections');
 const exprRemoveBtn = document.getElementById('exprRemoveBtn');
 const exprCancelBtn = document.getElementById('exprCancelBtn');
 const exprApplyBtn = document.getElementById('exprApplyBtn');
+
+// Simple-builder + mode-switch DOM, looked up once like every other ref.
+const simplePanel = document.getElementById('simplePanel');
+const advancedPanel = document.getElementById('advancedPanel');
+const simpleSearchInput = document.getElementById('simpleSearchInput');
+const simpleFilters = document.getElementById('simpleFilters');
+const addFilterBtn = document.getElementById('addFilterBtn');
+const clearFiltersBtn = document.getElementById('clearFiltersBtn');
+const simpleMatchGroup = document.getElementById('simpleMatchGroup');
+const simpleExamples = document.getElementById('simpleExamples');
+const simpleStatus = document.getElementById('simpleStatus');
+const advancedToggle = document.getElementById('advancedToggle');
+const simpleToggle = document.getElementById('simpleToggle');
+const queryRoundTripNote = document.getElementById('queryRoundTripNote');
 
 // ---------- Live schema ----------
 let searchSchemaCache = null;
@@ -2396,36 +2447,638 @@ function insertIntoExpr(text, caretIn) {
   scheduleExprStatus();
 }
 
+// ========== Simple builder (plain-language filters) ==========
+// The default search experience. Users pick a field, a plain-word condition
+// and a value; this module compiles that into a filtrex expression and hands
+// it to the same evaluator Advanced mode uses. Power users can flip to
+// Advanced and see the generated expression, which is also how we round-trip
+// an expression back into rows (see parseSimpleExpression).
+let builderSearch = '';
+let builderMatch = 'all';        // 'all' | 'any'
+let builderFilters = [];         // { id, field, op, value, value2 }
+let builderFilterSeq = 0;
+
+// Friendly label shown in the field dropdown. Link/tag prefixes are storage
+// markers, so the dropdown shows what users think the field is called.
+function builderFieldLabel(key) {
+  if (key === 'name') return 'Card name';
+  if (isLinkKey(key)) return 'Links to · ' + linkLabel(key);
+  if (isTagKey(key)) return 'Tag · ' + tagLabel(key);
+  return key;
+}
+
+// Collects the fields actually present in the current data: their sample
+// values (for suggestions) and whether they read as mostly numeric (which
+// unlocks the greater/less/between conditions). Hidden cards are excluded the
+// same way the advanced suggestion schema excludes them.
+function getBuilderFields() {
+  const map = new Map();
+  getVisibleSchemes().forEach(s => {
+    const e = getEffective(s.id);
+    Object.entries(e.fields || {}).forEach(([k, v]) => {
+      let rec = map.get(k);
+      if (!rec) { rec = { total: 0, numericCount: 0, freq: new Map() }; map.set(k, rec); }
+      const str = v == null ? '' : String(v);
+      if (str.trim() !== '') {
+        rec.total++;
+        if (Number.isFinite(Number(str.trim()))) rec.numericCount++;
+        rec.freq.set(str, (rec.freq.get(str) || 0) + 1);
+      }
+    });
+  });
+  const fields = [];
+  map.forEach((rec, key) => {
+    fields.push({
+      key,
+      label: builderFieldLabel(key),
+      numeric: rec.total > 0 && rec.numericCount / rec.total >= 0.7,
+      samples: [...rec.freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20).map(e2 => e2[0])
+    });
+  });
+  // A pseudo-field so the card name can be filtered like any other field.
+  fields.push({
+    key: 'name',
+    label: 'Card name',
+    numeric: false,
+    samples: getVisibleSchemes().map(s => getEffective(s.id).name).filter(Boolean).slice(0, 20)
+  });
+  fields.sort((a, b) => a.label.localeCompare(b.label));
+  return fields;
+}
+
+// Conditions offered for a field. Numeric fields gain the ordering ones; the
+// empty checks apply to any field because a missing value is meaningful for
+// both text and numbers.
+function builderOpDefs(numeric) {
+  const ops = [
+    { v: 'contains', label: 'contains' },
+    { v: 'exactly', label: 'is exactly' },
+    { v: 'not', label: 'is not' },
+    { v: 'startsWith', label: 'starts with' },
+    { v: 'empty', label: 'is empty' },
+    { v: 'notEmpty', label: 'is not empty' }
+  ];
+  if (numeric) {
+    ops.splice(1, 0,
+      { v: 'gt', label: 'is greater than' },
+      { v: 'lt', label: 'is less than' },
+      { v: 'between', label: 'is between' });
+  }
+  return ops;
+}
+
+function builderOpHelp(op) {
+  switch (op) {
+    case 'contains': return 'Matches anywhere in the text, ignoring capital letters.';
+    case 'exactly': return 'The whole value must match, ignoring capital letters.';
+    case 'not': return 'The value must be different.';
+    case 'startsWith': return 'The value begins with your text.';
+    case 'empty': return 'The field is missing or blank.';
+    case 'notEmpty': return 'The field has any value at all.';
+    case 'gt': return 'The field is a number greater than your value.';
+    case 'lt': return 'The field is a number less than your value.';
+    case 'between': return 'The field is a number between the two values, inclusive.';
+    default: return '';
+  }
+}
+
+// ---------- Builder → expression compiler ----------
+// The single place builder state becomes a filtrex expression. Keeping all
+// generation here means the guided UI and the Advanced textarea can never
+// drift, and the round-trip parser only has to understand what this emits.
+// Values are passed as quoted string literals to the icontains-family
+// helpers so quotes, parentheses and non-ASCII characters in a value can't
+// break the expression; numeric comparisons emit bare numbers so the ordering
+// operators work on real numbers.
+function builderFieldRef(key) {
+  if (key === 'name') return 'name';
+  return 'field:"' + String(key).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+}
+
+function quoteBuilderLiteral(s) {
+  return '"' + String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+}
+
+function builderIsNumber(s) {
+  const t = String(s == null ? '' : s).trim();
+  return t !== '' && Number.isFinite(Number(t));
+}
+
+function builderNumLiteral(s) {
+  return String(Number(String(s).trim()));
+}
+
+function buildSearchClause(text) {
+  const q = (text || '').trim();
+  if (!q) return '';
+  // Same grammar as the plain header search: spaces mean AND, | means OR.
+  const groups = q.split('|')
+    .map(g => g.split(/\s+/).filter(Boolean))
+    .filter(g => g.length);
+  if (!groups.length) return '';
+  const groupExprs = groups.map(terms =>
+    '(' + terms.map(t => `icontains(${BUILDER_TEXT_KEY}, ${quoteBuilderLiteral(t)})`).join(' and ') + ')');
+  return groupExprs.length > 1 ? '(' + groupExprs.join(' or ') + ')' : groupExprs[0];
+}
+
+function filterRowExpr(f) {
+  if (!f || !f.field) return '';
+  const ref = builderFieldRef(f.field);
+  const val = f.value == null ? '' : String(f.value);
+  const val2 = f.value2 == null ? '' : String(f.value2);
+  switch (f.op) {
+    case 'contains': return val.trim() ? `icontains(${ref}, ${quoteBuilderLiteral(val)})` : '';
+    case 'exactly': return val.trim() ? `iequals(${ref}, ${quoteBuilderLiteral(val)})` : '';
+    case 'not': return val.trim() ? `inotequals(${ref}, ${quoteBuilderLiteral(val)})` : '';
+    case 'startsWith': return val.trim() ? `istartsWith(${ref}, ${quoteBuilderLiteral(val)})` : '';
+    case 'empty': return `empty(${ref})`;
+    case 'notEmpty': return `not empty(${ref})`;
+    case 'gt': return builderIsNumber(val) ? `${ref} > ${builderNumLiteral(val)}` : '';
+    case 'lt': return builderIsNumber(val) ? `${ref} < ${builderNumLiteral(val)}` : '';
+    case 'between': {
+      const hasA = builderIsNumber(val), hasB = builderIsNumber(val2);
+      if (hasA && hasB) return `(${ref} >= ${builderNumLiteral(val)} and ${ref} <= ${builderNumLiteral(val2)})`;
+      // A half-filled range degrades to a one-sided comparison (emitted with
+      // strict operators so it round-trips back to greater/less-than).
+      if (hasA) return `${ref} > ${builderNumLiteral(val)}`;
+      if (hasB) return `${ref} < ${builderNumLiteral(val2)}`;
+      return '';
+    }
+    default: return '';
+  }
+}
+
+function buildFiltersClause() {
+  const atoms = builderFilters.map(filterRowExpr).filter(Boolean);
+  if (!atoms.length) return '';
+  const joined = atoms.map(a => '(' + a + ')').join(builderMatch === 'any' ? ' or ' : ' and ');
+  return '(' + joined + ')';
+}
+
+function buildSimpleExpression() {
+  const searchExpr = buildSearchClause(builderSearch);
+  const filtersExpr = buildFiltersClause();
+  if (searchExpr && filtersExpr) return `${searchExpr} and ${filtersExpr}`;
+  return searchExpr || filtersExpr || '';
+}
+
+// ---------- Expression → builder parser (round-trip) ----------
+// Recognises exactly the shapes buildSimpleExpression emits (plus the same
+// atoms typed by hand), so Simple ↔ Advanced switching never silently drops
+// a query. Returns null when the expression uses anything the builder can't
+// represent; the caller then keeps the expression and explains why.
+
+// Removes one balanced wrapping pair of parentheses, or leaves the string
+// untouched if the outer pair isn't a matching wrapper.
+function stripOneOuterParen(s) {
+  s = s.trim();
+  if (s.length < 2 || s[0] !== '(' || s[s.length - 1] !== ')') return s;
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '"') { i++; while (i < s.length && s[i] !== '"') { if (s[i] === '\\') i++; i++; } continue; }
+    if (c === '(') depth++;
+    else if (c === ')') { depth--; if (depth === 0 && i !== s.length - 1) return s; }
+  }
+  return depth === 0 ? s.slice(1, -1).trim() : s;
+}
+
+// Splits on a separator that sits at parenthesis depth 0 and outside strings.
+function splitTopLevel(s, sep) {
+  const parts = [];
+  let depth = 0, i = 0, start = 0;
+  while (i < s.length) {
+    const c = s[i];
+    if (c === '"') { i++; while (i < s.length && s[i] !== '"') { if (s[i] === '\\') i++; i++; } i++; continue; }
+    if (c === '(') depth++;
+    else if (c === ')') depth--;
+    else if (depth === 0 && s.startsWith(sep, i)) { parts.push(s.slice(start, i)); i += sep.length; start = i; continue; }
+    i++;
+  }
+  parts.push(s.slice(start));
+  return parts;
+}
+
+function unquoteBuilderLiteral(s) {
+  s = String(s).trim();
+  if (s.length < 2 || s[0] !== '"' || s[s.length - 1] !== '"') return null;
+  return s.slice(1, -1).replace(/\\(["\\])/g, '$1');
+}
+
+const PARSE_REF = '(?:name|field\\s*:\\s*"(?:[^"\\\\]|\\\\.)*")';
+const PARSE_LIT = '"(?:[^"\\\\]|\\\\.)*"';
+const PARSE_NUM = '-?\\d+(?:\\.\\d+)?';
+
+function parseFieldRef(ref) {
+  ref = String(ref).trim();
+  if (ref === 'name') return 'name';
+  const m = ref.match(/^field\s*:\s*"((?:[^"\\]|\\.)*)"$/);
+  if (!m) return null;
+  return m[1].replace(/\\(["\\])/g, '$1');
+}
+
+function parseFilterAtom(atom) {
+  atom = stripOneOuterParen(atom);
+  let m;
+  const unary = (re, op) => {
+    const mm = atom.match(re);
+    if (!mm) return null;
+    const k = parseFieldRef(mm[1]);
+    const v = unquoteBuilderLiteral(mm[2]);
+    if (k === null || v === null) return null;
+    return { field: k, op, value: v };
+  };
+  let res;
+  res = unary(new RegExp('^icontains\\s*\\(\\s*(' + PARSE_REF + ')\\s*,\\s*(' + PARSE_LIT + ')\\s*\\)$'), 'contains');
+  if (res) return res;
+  res = unary(new RegExp('^istartsWith\\s*\\(\\s*(' + PARSE_REF + ')\\s*,\\s*(' + PARSE_LIT + ')\\s*\\)$'), 'startsWith');
+  if (res) return res;
+  res = unary(new RegExp('^iequals\\s*\\(\\s*(' + PARSE_REF + ')\\s*,\\s*(' + PARSE_LIT + ')\\s*\\)$'), 'exactly');
+  if (res) return res;
+  res = unary(new RegExp('^inotequals\\s*\\(\\s*(' + PARSE_REF + ')\\s*,\\s*(' + PARSE_LIT + ')\\s*\\)$'), 'not');
+  if (res) return res;
+
+  m = atom.match(new RegExp('^not\\s+empty\\s*\\(\\s*(' + PARSE_REF + ')\\s*\\)$'));
+  if (m) { const k = parseFieldRef(m[1]); return k === null ? null : { field: k, op: 'notEmpty' }; }
+  m = atom.match(new RegExp('^empty\\s*\\(\\s*(' + PARSE_REF + ')\\s*\\)$'));
+  if (m) { const k = parseFieldRef(m[1]); return k === null ? null : { field: k, op: 'empty' }; }
+
+  m = atom.match(new RegExp('^(' + PARSE_REF + ')\\s*>=\\s*(' + PARSE_NUM + ')\\s+and\\s+(' + PARSE_REF + ')\\s*<=\\s*(' + PARSE_NUM + ')$'));
+  if (m) {
+    const k1 = parseFieldRef(m[1]), k2 = parseFieldRef(m[3]);
+    if (k1 !== null && k1 === k2) return { field: k1, op: 'between', value: m[2], value2: m[4] };
+    return null;
+  }
+  m = atom.match(new RegExp('^(' + PARSE_REF + ')\\s*>\\s*(' + PARSE_NUM + ')$'));
+  if (m) { const k = parseFieldRef(m[1]); return k === null ? null : { field: k, op: 'gt', value: m[2] }; }
+  m = atom.match(new RegExp('^(' + PARSE_REF + ')\\s*<\\s*(' + PARSE_NUM + ')$'));
+  if (m) { const k = parseFieldRef(m[1]); return k === null ? null : { field: k, op: 'lt', value: m[2] }; }
+  return null;
+}
+
+function parseSearchClause(p) {
+  p = stripOneOuterParen(p);
+  const orGroups = splitTopLevel(p, ' or ');
+  const wordGroups = [];
+  for (const g of orGroups) {
+    const inner = stripOneOuterParen(g);
+    const terms = splitTopLevel(inner, ' and ');
+    const words = [];
+    for (const t of terms) {
+      const m = stripOneOuterParen(t).match(
+        new RegExp('^icontains\\s*\\(\\s*' + BUILDER_TEXT_KEY + '\\s*,\\s*(' + PARSE_LIT + ')\\s*\\)$'));
+      if (!m) return null;
+      const lit = unquoteBuilderLiteral(m[1]);
+      if (lit === null) return null;
+      words.push(lit);
+    }
+    wordGroups.push(words.join(' '));
+  }
+  return wordGroups.join(' | ');
+}
+
+function parseFiltersClause(p) {
+  p = stripOneOuterParen(p);
+  const orParts = splitTopLevel(p, ' or ');
+  const andParts = splitTopLevel(p, ' and ');
+  let atoms, match;
+  if (orParts.length > 1 && andParts.length > 1) return null; // mixed → too custom
+  if (orParts.length > 1) { atoms = orParts; match = 'any'; }
+  else { atoms = andParts; match = 'all'; }
+  const filters = [];
+  for (const a of atoms) {
+    const f = parseFilterAtom(a);
+    if (!f) return null;
+    filters.push(f);
+  }
+  return { match, filters };
+}
+
+function parseSimpleExpression(expr) {
+  const src = (expr || '').trim();
+  if (!src) return { search: '', match: 'all', filters: [] };
+  const rawParts = splitTopLevel(src, ' and ');
+  let search = null, filters = null;
+  for (const raw of rawParts) {
+    const p = stripOneOuterParen(raw);
+    if (p.includes(BUILDER_TEXT_KEY)) {
+      if (search !== null) return null;      // two text clauses — not ours
+      search = parseSearchClause(p);
+      if (search === null) return null;
+    } else {
+      if (filters !== null) return null;     // two filter clauses — not ours
+      filters = parseFiltersClause(p);
+      if (filters === null) return null;
+    }
+  }
+  return {
+    search: search || '',
+    match: filters ? filters.match : 'all',
+    filters: filters ? filters.filters : []
+  };
+}
+
+// ---------- Simple builder rendering ----------
+function filterRowHtml(f, fields, byKey) {
+  const info = byKey.get(f.field);
+  const numeric = !!(info && info.numeric);
+  const opDefs = builderOpDefs(numeric);
+  if (!opDefs.some(o => o.v === f.op)) f.op = 'contains';
+  const showValue = f.op !== 'empty' && f.op !== 'notEmpty';
+  const isBetween = f.op === 'between';
+  const samples = info ? info.samples : [];
+  const listId = 'filter-vals-' + f.id;
+  const fieldId = 'filter-field-' + f.id;
+  const fieldOptions = ['<option value="">Choose a field…</option>']
+    .concat(fields.map(x => `<option value="${escAttr(x.key)}"${x.key === f.field ? ' selected' : ''}>${esc(x.label)}</option>`))
+    .join('');
+  const opOptions = opDefs.map(o => `<option value="${o.v}"${o.v === f.op ? ' selected' : ''}>${esc(o.label)}</option>`).join('');
+  let valueHtml = '';
+  if (showValue) {
+    valueHtml = isBetween
+      ? `<input type="text" class="filter-value" list="${listId}" value="${escAttr(f.value)}" placeholder="from" inputmode="decimal" aria-label="From value" />`
+        + `<span class="filter-and">and</span>`
+        + `<input type="text" class="filter-value filter-value2" list="${listId}" value="${escAttr(f.value2)}" placeholder="to" inputmode="decimal" aria-label="To value" />`
+      : `<input type="text" class="filter-value" list="${listId}" value="${escAttr(f.value)}" placeholder="value" aria-label="Filter value" />`;
+  }
+  const datalist = samples.length
+    ? `<datalist id="${listId}">${samples.map(s => `<option value="${escAttr(s)}"></option>`).join('')}</datalist>`
+    : '';
+  const help = builderOpHelp(f.op);
+  return `<div class="filter-row" data-id="${f.id}">
+    <div class="filter-row-main">
+      <label class="sr-only" for="${fieldId}">Field</label>
+      <select class="filter-field" id="${fieldId}">${fieldOptions}</select>
+      <select class="filter-op" aria-label="Condition">${opOptions}</select>
+      <div class="filter-value-wrap">${valueHtml}</div>
+      <button type="button" class="filter-remove" title="Remove filter" aria-label="Remove filter">&times;</button>
+    </div>
+    ${help ? `<p class="filter-help">${esc(help)}</p>` : ''}
+    ${datalist}
+  </div>`;
+}
+
+function renderSimpleFilters() {
+  const fields = getBuilderFields();
+  const byKey = new Map(fields.map(f => [f.key, f]));
+  if (!builderFilters.length) {
+    simpleFilters.innerHTML = '<p class="simple-empty">No filters yet — use the search box above, or add a filter.</p>';
+    return;
+  }
+  simpleFilters.innerHTML = builderFilters.map(f => filterRowHtml(f, fields, byKey)).join('');
+}
+
+function focusFilterControl(id, selector) {
+  const row = simpleFilters.querySelector(`[data-id="${id}"]`);
+  const el = row && row.querySelector(selector);
+  if (el) el.focus();
+}
+
+function addFilter(init) {
+  const f = Object.assign(
+    { id: 'bf' + (++builderFilterSeq), field: '', op: 'contains', value: '', value2: '' },
+    init || {});
+  builderFilters.push(f);
+  renderSimpleFilters();
+  refreshSimpleStatus();
+  if (!f.field) focusFilterControl(f.id, '.filter-field');
+  else focusFilterControl(f.id, '.filter-value');
+  return f;
+}
+
+function renderSimpleExamples() {
+  const chips = [];
+  const tagField = getBuilderFields().find(f => isTagKey(f.key));
+  if (tagField) chips.push({ label: 'Schemes with a tag', apply: () => addFilter({ field: tagField.key, op: 'notEmpty' }) });
+  chips.push({ label: 'A field is empty', apply: () => addFilter({ field: '', op: 'empty' }) });
+  chips.push({ label: 'Card name contains “tank”', apply: () => addFilter({ field: 'name', op: 'contains', value: 'tank' }) });
+  simpleExamples._chips = chips;
+  simpleExamples.innerHTML = chips.map((c, i) => `<button type="button" class="simple-chip" data-i="${i}">${esc(c.label)}</button>`).join('');
+}
+
+function syncSimpleMatchButtons() {
+  simpleMatchGroup.querySelectorAll('.simple-match-btn').forEach(b => {
+    const on = b.dataset.match === builderMatch;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-pressed', String(on));
+  });
+}
+
+// ---------- Simple builder feedback ----------
+let simpleCountTimer = null;
+function scheduleSimpleCount() {
+  clearTimeout(simpleCountTimer);
+  simpleCountTimer = setTimeout(refreshSimpleStatus, 150);
+}
+
+function refreshSimpleStatus() {
+  clearTimeout(simpleCountTimer);
+  simpleCountTimer = null;
+  const total = getVisibleSchemes().length;
+  const expr = buildSimpleExpression();
+  if (!expr) {
+    simpleStatus.className = 'simple-status';
+    simpleStatus.textContent = 'Type in the box or add a filter to narrow the list.';
+    return;
+  }
+  const n = countExprMatches(expr) || 0;
+  if (n === 0) {
+    simpleStatus.className = 'simple-status empty';
+    simpleStatus.textContent = 'No schemes match. Try removing a filter or checking the spelling.';
+  } else {
+    simpleStatus.className = 'simple-status ok';
+    simpleStatus.textContent = `${n} of ${total} scheme${total !== 1 ? 's' : ''} match`;
+  }
+}
+
+// A short, human summary for the header pill so Simple mode never shows raw
+// syntax in the chrome (the expression is still available in Advanced).
+function simpleSummaryLabel() {
+  const q = builderSearch.trim();
+  const n = builderFilters.filter(f => f.field && filterRowExpr(f)).length;
+  const bits = [];
+  if (q) bits.push(q.length > 24 ? q.slice(0, 23) + '…' : q);
+  if (n) bits.push(n + (n === 1 ? ' filter' : ' filters'));
+  if (n > 1) bits.push(builderMatch === 'any' ? 'match any' : 'match all');
+  return bits.join(' · ') || 'filters';
+}
+
+// ---------- Simple panel wiring ----------
+simpleSearchInput.addEventListener('input', () => {
+  builderSearch = simpleSearchInput.value;
+  scheduleSimpleCount();
+});
+simpleSearchInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); applySimpleFilter(); }
+});
+simpleMatchGroup.addEventListener('click', e => {
+  const btn = e.target.closest('.simple-match-btn');
+  if (!btn || btn.dataset.match === builderMatch) return;
+  builderMatch = btn.dataset.match;
+  syncSimpleMatchButtons();
+  refreshSimpleStatus();
+});
+addFilterBtn.addEventListener('click', () => addFilter({}));
+clearFiltersBtn.addEventListener('click', () => {
+  builderSearch = '';
+  builderFilters = [];
+  simpleSearchInput.value = '';
+  renderSimpleFilters();
+  syncSimpleMatchButtons();
+  refreshSimpleStatus();
+  simpleSearchInput.focus();
+});
+simpleFilters.addEventListener('change', e => {
+  const row = e.target.closest('.filter-row');
+  if (!row) return;
+  const f = builderFilters.find(x => x.id === row.dataset.id);
+  if (!f) return;
+  if (e.target.classList.contains('filter-field')) {
+    f.field = e.target.value;
+    renderSimpleFilters();
+    focusFilterControl(f.id, '.filter-op');
+  } else if (e.target.classList.contains('filter-op')) {
+    f.op = e.target.value;
+    renderSimpleFilters();
+    if (f.op !== 'empty' && f.op !== 'notEmpty') focusFilterControl(f.id, '.filter-value');
+  }
+  refreshSimpleStatus();
+});
+simpleFilters.addEventListener('input', e => {
+  const row = e.target.closest('.filter-row');
+  if (!row) return;
+  const f = builderFilters.find(x => x.id === row.dataset.id);
+  if (!f) return;
+  if (e.target.classList.contains('filter-value2')) f.value2 = e.target.value;
+  else if (e.target.classList.contains('filter-value')) f.value = e.target.value;
+  scheduleSimpleCount();
+});
+simpleFilters.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.classList.contains('filter-value')) {
+    e.preventDefault();
+    applySimpleFilter();
+  }
+});
+simpleFilters.addEventListener('click', e => {
+  const btn = e.target.closest('.filter-remove');
+  if (!btn) return;
+  const row = btn.closest('.filter-row');
+  if (!row) return;
+  builderFilters = builderFilters.filter(x => x.id !== row.dataset.id);
+  renderSimpleFilters();
+  refreshSimpleStatus();
+});
+simpleExamples.addEventListener('click', e => {
+  const btn = e.target.closest('.simple-chip');
+  if (!btn) return;
+  const chips = simpleExamples._chips || [];
+  const c = chips[Number(btn.dataset.i)];
+  if (c) c.apply();
+});
+
+// ---------- Mode switching ----------
+function showSimpleMode() {
+  simplePanel.classList.remove('hidden');
+  advancedPanel.classList.add('hidden');
+  advancedToggle.classList.remove('hidden');
+  simpleToggle.classList.add('hidden');
+  queryRoundTripNote.classList.add('hidden');
+  simpleSearchInput.value = builderSearch;
+  syncSimpleMatchButtons();
+  renderSimpleFilters();
+  renderSimpleExamples();
+  refreshSimpleStatus();
+}
+
+function showAdvancedMode() {
+  // Generate the current builder as the starting expression so switching
+  // teaches the syntax by example instead of discarding the filters.
+  exprInput.value = buildSimpleExpression();
+  simplePanel.classList.add('hidden');
+  advancedPanel.classList.remove('hidden');
+  advancedToggle.classList.add('hidden');
+  simpleToggle.classList.remove('hidden');
+  queryRoundTripNote.classList.add('hidden');
+  buildQuerySections();
+  hideSuggest();
+  updateExprStatus();
+  exprInput.focus();
+  exprInput.setSelectionRange(exprInput.value.length, exprInput.value.length);
+}
+
+function switchToSimple() {
+  const parsed = parseSimpleExpression(exprInput.value);
+  if (!parsed) {
+    // Keep the expression intact and say why it can't be shown as filters.
+    queryRoundTripNote.textContent = 'This search is too custom to show as simple filters. Your expression is kept as it is.';
+    queryRoundTripNote.classList.remove('hidden');
+    return;
+  }
+  builderSearch = parsed.search;
+  builderMatch = parsed.match;
+  builderFilters = parsed.filters.map(f => Object.assign(
+    { id: 'bf' + (++builderFilterSeq), value: '', value2: '' }, f));
+  showSimpleMode();
+  simpleSearchInput.focus();
+}
+
+advancedToggle.addEventListener('click', showAdvancedMode);
+simpleToggle.addEventListener('click', switchToSimple);
+
 // ---------- Modal lifecycle ----------
 function syncHeaderChrome() {
-  const exprActive = searchMode === 'expr';
-  // In expression mode the input yields to a pill naming the filter, so
-  // the mode is legible at a glance.
-  searchWrapper.classList.toggle('mode-expr', exprActive);
-  exprPill.classList.toggle('hidden', !exprActive);
-  if (exprActive && exprPillText.textContent !== exprFilter) {
-    exprPillText.textContent = exprFilter;
-    exprPill.title = `Filtering by: ${exprFilter}`;
+  const filterActive = searchMode === 'expr' || searchMode === 'simple';
+  // With a filter active the input yields to a pill naming the filter, so the
+  // mode is legible at a glance. Simple mode shows a plain summary; Advanced
+  // shows the expression itself.
+  searchWrapper.classList.toggle('mode-expr', filterActive);
+  exprPill.classList.toggle('hidden', !filterActive);
+  if (filterActive) {
+    const label = searchMode === 'simple' ? simpleSummaryLabel() : exprFilter;
+    const title = searchMode === 'simple'
+      ? 'Filtering with simple filters — click to edit'
+      : `Filtering by: ${exprFilter}`;
+    if (exprPillText.textContent !== label || exprPill.title !== title) {
+      exprPillText.textContent = label;
+      exprPill.title = title;
+    }
   }
-  exprModeBtn.classList.toggle('active', exprActive);
-  searchClearBtn.classList.toggle('hidden', exprActive || searchInput.value.length === 0);
+  exprModeBtn.classList.toggle('active', filterActive);
+  searchClearBtn.classList.toggle('hidden', filterActive || searchInput.value.length === 0);
 }
 
 function openQueryModal() {
-  exprInput.value = exprFilter;
-  buildQuerySections();
-  exprRemoveBtn.classList.toggle('hidden', !(searchMode === 'expr' && exprFilter));
-  hideSuggest();
-  updateExprStatus();
+  const filterActive = (searchMode === 'expr' || searchMode === 'simple') && exprFilter;
+  exprRemoveBtn.classList.toggle('hidden', !filterActive);
   queryModal.classList.remove('hidden');
-  exprInput.focus();
-  exprInput.setSelectionRange(exprInput.value.length, exprInput.value.length);
+  if (searchMode === 'expr' && exprFilter) {
+    // Reopening an expert search drops straight into Advanced so the raw text
+    // is exactly as applied.
+    simplePanel.classList.add('hidden');
+    advancedPanel.classList.remove('hidden');
+    advancedToggle.classList.add('hidden');
+    simpleToggle.classList.remove('hidden');
+    queryRoundTripNote.classList.add('hidden');
+    exprInput.value = exprFilter;
+    buildQuerySections();
+    hideSuggest();
+    updateExprStatus();
+    exprInput.focus();
+    exprInput.setSelectionRange(exprInput.value.length, exprInput.value.length);
+  } else {
+    // Default entry: the guided builder. Any already-applied simple filter is
+    // still in state and reappears.
+    showSimpleMode();
+    simpleSearchInput.focus();
+  }
 }
 
 function closeQueryModal() {
   queryModal.classList.add('hidden');
   clearTimeout(exprStatusTimer);
   exprStatusTimer = null;
+  clearTimeout(simpleCountTimer);
+  simpleCountTimer = null;
   hideSuggest();
 }
 
@@ -2441,14 +3094,41 @@ function applyExprFromEditor() {
   showToast(`ƒx filter applied · ${matches} matching card${matches === 1 ? '' : 's'}`);
 }
 
+// Applies the guided builder. Everything is compiled through
+// buildSimpleExpression and evaluated by the same path as Advanced mode; an
+// empty builder means "no filter", which clears the search.
+function applySimpleFilter() {
+  const expr = buildSimpleExpression();
+  if (!expr) {
+    exitExprMode();
+    closeQueryModal();
+    return;
+  }
+  exprFilter = expr;
+  searchMode = 'simple';
+  syncHeaderChrome();
+  render();
+  closeQueryModal();
+  const n = countExprMatches(expr) || 0;
+  showToast(`Filters applied · ${n} matching scheme${n === 1 ? '' : 's'}`);
+}
+
 function exitExprMode() {
   searchMode = 'text';
   exprFilter = '';
+  // Clearing a simple filter resets the builder too, so reopening starts
+  // fresh rather than resurrecting the filter the user just removed.
+  builderSearch = '';
+  builderMatch = 'all';
+  builderFilters = [];
   syncHeaderChrome();
   render();
 }
 
-exprApplyBtn.addEventListener('click', applyExprFromEditor);
+exprApplyBtn.addEventListener('click', () => {
+  if (advancedPanel.classList.contains('hidden')) applySimpleFilter();
+  else applyExprFromEditor();
+});
 exprCancelBtn.addEventListener('click', closeQueryModal);
 queryModalClose.addEventListener('click', closeQueryModal);
 exprRemoveBtn.addEventListener('click', () => { exitExprMode(); closeQueryModal(); });
@@ -3631,7 +4311,7 @@ window.addEventListener('beforeunload', e => {
 document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
     e.preventDefault();
-    if (searchMode === 'expr') openQueryModal();
+    if (searchMode === 'expr' || searchMode === 'simple') openQueryModal();
     else {
       searchInput.focus();
       searchInput.select();
