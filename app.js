@@ -95,7 +95,7 @@ function stageChange(id, change) {
 
 function stageNewScheme(name, fields, hiddenFields, groups) {
   const id = `_new_${++newSchemeCounter}`;
-  schemes.push({ id, name, fields: fields || {}, hiddenFields: hiddenFields || {}, groups: groups || [], hidden: false, createdAt: new Date().toISOString() });
+  schemes.push({ id, uid: generateUid(), name, fields: fields || {}, hiddenFields: hiddenFields || {}, groups: groups || [], hidden: false, createdAt: new Date().toISOString() });
   pendingChanges.set(id, { name, fields: fields || {}, hiddenFields: hiddenFields || {}, groups: groups || [] });
   render();
 }
@@ -110,8 +110,28 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
+function generateUid() {
+  return 'c-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+}
+
+function stableUidForScheme(s, index = 0) {
+  const name = (s.name || '').trim();
+  const created = s.createdAt || '';
+  const base = (name + '|' + created + '|' + index).slice(0, 128);
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < base.length; i++) {
+    const c = base.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 2654435761);
+    h2 = Math.imul(h2 ^ c, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return 's-' + (h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0');
+}
+
 function toExportShape(e) {
   return {
+    uid: e.uid || stableUidForScheme(e),
     name: e.name,
     fields: e.fields,
     hiddenFields: e.hiddenFields,
@@ -121,8 +141,10 @@ function toExportShape(e) {
   };
 }
 
-function normalizeScheme(raw) {
+function normalizeScheme(raw, index = 0) {
+  const uid = raw.uid || stableUidForScheme(raw, index);
   return {
+    uid,
     name: raw.name,
     fields: raw.fields || {},
     hiddenFields: raw.hiddenFields || {},
@@ -3402,7 +3424,7 @@ function planRenamePropagation() {
         if (staged.hiddenFields || hiddenRes.changed) staged.hiddenFields = hiddenRes.dict;
       } else {
         const target = findScheme(s.id);
-        if (target) extraPuts.push({ ...target, fields: fieldsRes.dict, hiddenFields: hiddenRes.dict });
+        if (target) extraPuts.push({ ...target, fields: fieldsRes.dict, hiddenFields: hiddenRes.dict, uid: target.uid || stableUidForScheme(target) });
       }
     }
   }
@@ -3428,11 +3450,11 @@ commitBtn.addEventListener('click', async () => {
         const { id: _discard, ...schemeData } = { ...getEffective(id) };
         if (!schemeData.name) { skipped++; continue; }
         delete schemeData.id;
-        adds.push(schemeData);
+        adds.push({ uid: generateUid(), ...schemeData });
       } else {
         const base = findScheme(id);
         if (!base) { skipped++; continue; }
-        puts.push({ ...base, ...changes });
+        puts.push({ ...base, ...changes, uid: changes.uid || base.uid || stableUidForScheme({ ...base, ...changes }) });
       }
     }
     const stagedCount = puts.length + adds.length;
@@ -3443,14 +3465,14 @@ commitBtn.addEventListener('click', async () => {
     const putIds = new Set(puts.map(p => p.id));
     for (const rec of extraPuts) {
       if (putIds.has(rec.id)) continue;
-      puts.push(rec);
+      puts.push({ uid: rec.uid || stableUidForScheme(rec), ...rec });
     }
 
     // One transaction: either every card commits or the database is untouched.
     await dbCommit({ puts, adds });
     pendingChanges.clear();
     await loadSchemes();
-    setLocalModifiedAt();
+    noteLocalChange();
     exitSelectionMode();
     showToast(`${stagedCount} change${stagedCount !== 1 ? 's' : ''} committed${skipped ? ` (${skipped} skipped)` : ''}`);
   } catch (err) {
@@ -3819,7 +3841,7 @@ async function importSchemesData(data, replaceMode) {
   }
   // Clearing and re-adding in one transaction: any bad record aborts the
   // whole import instead of leaving the database emptied or half-written.
-  const records = data.map(normalizeScheme);
+  const records = data.map((s, i) => normalizeScheme(s, i));
   try {
     await dbCommit(replaceMode ? { puts: [], adds: records, clear: true } : { adds: records });
   } catch (err) {
@@ -3828,7 +3850,7 @@ async function importSchemesData(data, replaceMode) {
     return false;
   }
   await loadSchemes();
-  setLocalModifiedAt();
+  noteLocalChange();
   return true;
 }
 
@@ -3865,27 +3887,8 @@ function importJSON(file) {
 
 // ========== Data Menu ==========
 function openDataMenuModal() {
-  const connected = !!window._gdriveToken;
-
-  if (connected) {
-    driveStatusText.textContent = 'Connected to Google Drive';
-    const v = getLastSyncVersion();
-    const at = getLastSyncAt();
-    driveStatusSub.textContent = v > 0 ? `Last synced v${v} · ${new Date(at).toLocaleString()}` : 'Never synced';
-    driveConnectLabel.textContent = 'Disconnect from Google';
-    driveConnectIcon.textContent = '🔌';
-    driveConnectDesc.textContent = 'Click to sign out';
-    driveConnectDesc.style.opacity = '1';
-  } else {
-    driveStatusText.textContent = 'Not connected to Google Drive';
-    driveStatusSub.textContent = 'Click Sign in to authorize with Google Drive';
-    driveConnectLabel.textContent = 'Sign in with Google';
-    driveConnectIcon.textContent = '🔗';
-    driveConnectDesc.textContent = 'Redirects to Google to authorize this app';
-    driveConnectDesc.style.opacity = '1';
-  }
-
-  dataDriveSync.disabled = !connected;
+  // All Drive labels/state are owned by driveUI() in the sync section.
+  driveUI();
   dataMenuModal.classList.remove('hidden');
 }
 
@@ -3912,373 +3915,636 @@ importFileInput.addEventListener('change', e => {
   importFileInput.value = '';
 });
 
-// ========== Google Drive OAuth ==========
-window._gdriveToken = localStorage.getItem('gdrive_token') || null;
-window._gdriveTokenExpiry = parseInt(localStorage.getItem('gdrive_token_expiry') || '0', 10);
+// ========== Google Drive sync ==========
+/* Design (shared with the time-dial app)
+   - Local changes are detected by CONTENT HASH (canonical, normalized JSON) against the hash of the
+     last successful sync. Only COMMITTED data is hashed: staged (pendingChanges) edits are never
+     uploaded, and a sync pass that would apply remote data is refused while work is staged.
+   - Remote changes are detected from Drive file metadata (md5Checksum/version): one tiny GET, no
+     download unless the bytes actually changed.
+   - Decision flow: neither changed -> nothing; remote only -> pull; local only -> push; both ->
+     three-way merge (per-card, keyed by uid, local wins same-field conflicts, losing copies kept).
+   - Remote data is applied through applyLocal (never through the commit button), and sync state is
+     stored only after success, so applying remote data can never queue an upload of the same data.
+   - Sign-in uses Google Identity Services' popup token flow. It needs the page ORIGIN listed under
+     "Authorized JavaScript origins"; it does not use redirect URIs. */
 
-function saveDriveToken(token, expiresIn) {
-  window._gdriveToken = token;
-  window._gdriveTokenExpiry = Date.now() + (expiresIn - 60) * 1000;
-  localStorage.setItem('gdrive_token', token);
-  localStorage.setItem('gdrive_token_expiry', String(window._gdriveTokenExpiry));
+/* ==SYNC-CORE-BEGIN== */
+const SyncCore=(function(){
+'use strict';
+const SECRET=/ya29\.[\w.-]+|Bearer\s+[\w.~+\/=-]+|(?:access_token|refresh_token|client_secret|id_token)=[^&\s"']+|"(?:access_token|refresh_token|client_secret|id_token)"\s*:\s*"[^"]*"/gi;
+const scrub=s=>String(s==null?'':s).replace(SECRET,'[redacted]');
+
+class SyncError extends Error{
+  constructor(code,message,x={}){super(scrub(message));this.name='SyncError';this.code=code;
+    this.retryable=!!x.retryable;this.needsAuth=!!x.needsAuth;this.offline=!!x.offline;this.cancelled=!!x.cancelled;this.status=x.status||0}}
+const asSyncError=e=>e instanceof SyncError?e:new SyncError('UNEXPECTED','Unexpected sync error: '+scrub(e&&e.message||e));
+
+/* ---- canonical form + hash ---- */
+function canon(v){
+  if(v===undefined)return'∅';
+  const w=x=>{if(Array.isArray(x))return x.map(w);
+    if(x&&typeof x==='object'){const o={};Object.keys(x).sort().forEach(k=>{if(x[k]!==undefined)o[k]=w(x[k])});return o}
+    return x};
+  return JSON.stringify(w(v))}
+function hashStr(s){let h1=0xdeadbeef,h2=0x41c6ce57;
+  for(let i=0;i<s.length;i++){const c=s.charCodeAt(i);h1=Math.imul(h1^c,2654435761);h2=Math.imul(h2^c,1597334677)}
+  h1=Math.imul(h1^(h1>>>16),2246822507)^Math.imul(h2^(h2>>>13),3266489909);
+  h2=Math.imul(h2^(h2>>>16),2246822507)^Math.imul(h1^(h1>>>13),3266489909);
+  return(h2>>>0).toString(16).padStart(8,'0')+(h1>>>0).toString(16).padStart(8,'0')+'-'+s.length.toString(16)}
+const snapOf=obj=>{const str=canon(obj);return{obj,str,hash:hashStr(str)}};
+const eq=(a,b)=>canon(a)===canon(b);
+const asList=d=>Array.isArray(d)?d:[];
+const isEmpty=d=>asList(d).length===0;
+
+/* ---- three-way merge (base, local, remote) ----
+   Policy: cards are keyed by their stable uid. Untouched side yields to the changed side (including
+   deletions); an edit beats a delete; when both edited the same card, fields merge individually,
+   primitive lists (e.g. groups) merge as sets, and a genuine same-field conflict is won by LOCAL
+   (the device the user is holding). The remote snapshot is always kept as a backup by the engine, so
+   nothing is lost silently. A null base behaves as "empty". */
+const isPrimArr=a=>Array.isArray(a)&&a.every(x=>x===null||typeof x!=='object');
+const isObj=x=>!!x&&typeof x==='object'&&!Array.isArray(x);
+function mergeVal(b,l,r){
+  if(eq(l,r))return l;if(eq(l,b))return r;if(eq(r,b))return l;
+  if(isPrimArr(l)&&isPrimArr(r)&&(b===undefined||isPrimArr(b))){
+    const B=new Set(b||[]),L=new Set(l),R=new Set(r);
+    return[...new Set([...l,...r])].filter(x=>!B.has(x)||(L.has(x)&&R.has(x)))}
+  /* A card's content lives in nested dicts (fields/hiddenFields), so recurse
+     into plain objects. Arrays of objects (groups) are treated as one value and
+     follow the local-wins policy. */
+  if(isObj(l)&&isObj(r)&&(b===undefined||isObj(b)))return mergeFields(b||{},l,r);
+  return l}
+function mergeFields(b,l,r){const out={};
+  b=b||{};l=l||{};r=r||{};
+  for(const k of new Set([...Object.keys(l),...Object.keys(r)])){const v=mergeVal(b[k],l[k],r[k]);if(v!==undefined)out[k]=v}
+  return out}
+function mergeItem(b,l,r){
+  if(eq(l,r))return l;if(eq(l,b))return r;if(eq(r,b))return l;
+  if(l===undefined)return r;if(r===undefined)return l;
+  return mergeFields(b||{},l,r)}
+function mergeList(b,l,r){
+  const idx=a=>new Map(asList(a).map(x=>[x.uid,x]));
+  const B=idx(b),L=idx(l),R=idx(r),out=[],seen=new Set();
+  /* Keep LOCAL order first, then append cards only the remote has. */
+  for(const x of asList(l)){const v=mergeItem(B.get(x.uid),L.get(x.uid),R.get(x.uid));if(v!==undefined){out.push(v);seen.add(x.uid)}}
+  for(const x of asList(r)){if(seen.has(x.uid))continue;const v=mergeItem(B.get(x.uid),undefined,R.get(x.uid));if(v!==undefined)out.push(v)}
+  return out}
+function merge3(base,local,remote){return mergeList(base,local,remote)}
+
+/* ---- Google sign-in (token flow, popup). One token client, one request at a time. ---- */
+function createAuth(o){
+  const SKEW=60000,T=o.timers||{setTimeout:(f,ms)=>setTimeout(f,ms),clearTimeout:t=>clearTimeout(t)};
+  let tok=null,client=null,cur=null,inflight=null,needsInteractive=false;
+  const readTok=()=>{if(tok)return tok;
+    try{const j=JSON.parse(o.storage.get()||'null');if(j&&typeof j.t==='string'&&j.t&&j.exp>0)tok=j}catch{}return tok};
+  const valid=()=>{const t=readTok();return t&&t.exp-SKEW>o.now()?t.t:''};
+  const invalidate=()=>{tok=null;try{o.storage.remove()}catch{}};
+  const CONFIG_ERR=['invalid_client','unauthorized_client','origin_mismatch','redirect_uri_mismatch','invalid_scope','invalid_request'];
+  function diagnose(){
+    if(o.protocol==='file:'||o.origin==='null')
+      return new SyncError('AUTH_ORIGIN','Google sign-in cannot run from a file:// page. Open the app from its https:// address.',{needsAuth:true});
+    if(o.protocol==='http:'&&!/^(localhost|127\.0\.0\.1|\[::1\])$/.test(o.hostname||''))
+      return new SyncError('AUTH_ORIGIN','Google sign-in requires https (or localhost). This page is served from '+o.origin+'.',{needsAuth:true});
+    return null}
+  function mapError(type,msg,interactive){
+    const orig=o.origin||'this page’s origin';
+    if(!interactive&&!CONFIG_ERR.includes(type))
+      return new SyncError('AUTH_REQUIRED','Google needs you to sign in again to continue syncing.',{needsAuth:true});
+    if(CONFIG_ERR.includes(type))
+      return new SyncError('AUTH_CONFIG','Google rejected the sign-in configuration ('+scrub(type)+'). Check the OAuth client ID and that '+orig+' is listed under Authorized JavaScript origins (redirect URIs are not used by this sign-in method).',{needsAuth:true});
+    switch(type){
+      case'popup_failed_to_open':return new SyncError('AUTH_POPUP_BLOCKED','The browser blocked the Google sign-in window. Allow pop-ups for this site and try again.',{needsAuth:true});
+      case'popup_closed':return new SyncError('AUTH_CLOSED','The Google sign-in window was closed before it finished. If it showed “origin_mismatch”, add '+orig+' under Authorized JavaScript origins for this OAuth client (this sign-in method does not use redirect URIs).',{needsAuth:true});
+      case'access_denied':return new SyncError('AUTH_DENIED','Google denied access. Approve the Drive permission, and if the OAuth consent screen is in Testing mode make sure this Google account is listed as a test user.',{needsAuth:true});
+      default:return new SyncError('AUTH_FAILED','Google sign-in failed ('+scrub(type)+')'+(msg?': '+scrub(msg):'')+'.',{needsAuth:true})}}
+  function request(interactive){
+    return Promise.resolve().then(()=>o.loadGis()).catch(()=>{throw new SyncError('AUTH_LOAD','Could not load Google Sign-In. Check your connection.',{retryable:true})})
+    .then(gis=>new Promise((res,rej)=>{
+      let done=false;
+      const finish=(fn,v)=>{if(done)return;done=true;T.clearTimeout(timer);if(cur===handlers)cur=null;fn(v)};
+      const handlers={
+        onResult:r=>{
+          if(!r||r.error)return finish(rej,mapError(r&&r.error||'unknown',r&&r.error_description,interactive));
+          if(!r.access_token)return finish(rej,new SyncError('AUTH_FAILED','Google returned no access token.',{needsAuth:true}));
+          tok={t:r.access_token,exp:o.now()+(Number(r.expires_in)||3600)*1000};
+          try{o.storage.set(JSON.stringify(tok))}catch{}
+          finish(res,tok.t)},
+        onError:e=>finish(rej,mapError(e&&e.type||'unknown',e&&e.message,interactive))};
+      const timer=T.setTimeout(()=>finish(rej,new SyncError('AUTH_TIMEOUT',interactive?'Google sign-in took too long. Try again.':'Google did not answer the background sign-in.',{needsAuth:true})),interactive?120000:15000);
+      cur=handlers;
+      try{
+        if(!client)client=gis.initTokenClient({client_id:o.clientId,scope:o.scope,
+          callback:r=>{cur&&cur.onResult(r)},error_callback:e=>{cur&&cur.onError(e)}});
+        const hint=o.getHint&&o.getHint();
+        client.requestAccessToken(interactive?{prompt:''}:Object.assign({prompt:'none'},hint?{hint}:{}))}
+      catch(e){finish(rej,mapError('exception',e&&e.message,interactive))}}))}
+  async function getToken(opt){
+    const interactive=!!(opt&&opt.interactive);
+    for(;;){
+      const v=valid();if(v)return v;
+      if(inflight){if(inflight.interactive||!interactive)return inflight.p;try{await inflight.p}catch{}continue}
+      if(!interactive&&needsInteractive)throw new SyncError('AUTH_REQUIRED','Google sign-in has expired. Reconnect to resume syncing.',{needsAuth:true});
+      const d=diagnose();if(d)throw d;
+      const entry={interactive};
+      entry.p=request(interactive).then(t=>{needsInteractive=false;return t},e=>{if(e&&e.needsAuth)needsInteractive=true;throw e})
+        .finally(()=>{if(inflight===entry)inflight=null});
+      inflight=entry;return entry.p}}
+  return{getToken,invalidate,clear(){invalidate();needsInteractive=false}}}
+
+/* ---- Drive adapter: folder/file lookup, metadata check, download, create/update ---- */
+function createDriveRemote(o){
+  const API='https://www.googleapis.com/drive/v3',UP='https://www.googleapis.com/upload/drive/v3',
+    FIELDS='id,version,md5Checksum,modifiedTime,trashed';
+  const esc=s=>String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+  async function call(url,init,ctx,tolerate404){
+    let refreshed=false;
+    for(;;){
+      const token=await o.auth.getToken({interactive:!!(ctx&&ctx.interactive)});
+      const ctl=typeof AbortController!=='undefined'?new AbortController():null,
+        to=ctl?setTimeout(()=>ctl.abort(),o.timeoutMs||20000):null;
+      let r;
+      try{r=await o.fetch(url,Object.assign({},init,{headers:Object.assign({},init&&init.headers,{Authorization:'Bearer '+token}),signal:ctl?ctl.signal:undefined}))}
+      catch(e){if(to)clearTimeout(to);
+        throw new SyncError(e&&e.name==='AbortError'?'TIMEOUT':'NETWORK',e&&e.name==='AbortError'?'Google Drive did not respond in time.':'Could not reach Google Drive. Check your connection.',{retryable:true})}
+      if(to)clearTimeout(to);
+      if(r.ok)return r;
+      if(r.status===404&&tolerate404)return r;
+      const body=await r.text().catch(()=>''),gmsg=(body.match(/"message":\s*"([^"]*)"/)||[])[1]||'',reason=(body.match(/"reason":\s*"([^"]*)"/)||[])[1]||'';
+      if(r.status===401){o.auth.invalidate();if(!refreshed){refreshed=true;continue}
+        throw new SyncError('AUTH_EXPIRED','Google sign-in has expired. Reconnect to resume syncing.',{needsAuth:true,status:401})}
+      if(r.status===403&&/rate|quota|limit/i.test(reason))throw new SyncError('RATE_LIMIT','Google Drive is rate limiting requests. Retrying shortly.',{retryable:true,status:403});
+      if(r.status===403)throw new SyncError('AUTH_SCOPE','Google Drive refused access. Reconnect and approve the Drive permission.',{needsAuth:true,status:403});
+      if(r.status===429||r.status>=500)throw new SyncError('HTTP_'+r.status,'Google Drive is temporarily unavailable ('+r.status+').',{retryable:true,status:r.status});
+      throw new SyncError('HTTP_'+r.status,'Google Drive error '+r.status+(gmsg?': '+gmsg:'')+'.',{status:r.status})}}
+  const norm=(j,folderId)=>({exists:true,fileId:j.id,folderId:folderId||'',version:String(j.version||''),md5:j.md5Checksum||'',modified:j.modifiedTime||''});
+  const list=async(q,fields,ctx,extra)=>{const r=await call(API+'/files?'+new URLSearchParams(Object.assign({q,fields,spaces:'drive',pageSize:'1'},extra||{})),{},ctx);return(await r.json()).files||[]};
+  async function findFolder(ctx,create){
+    let p='root';
+    for(const n of o.folder.split('/')){
+      let f=(await list("name='"+esc(n)+"' and '"+p+"' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",'files(id,name)',ctx))[0];
+      if(!f){if(!create)return'';
+        const c=await call(API+'/files?fields=id',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,mimeType:'application/vnd.google-apps.folder',parents:[p]})},ctx);
+        f=await c.json();if(!f.id)throw new SyncError('HTTP_0','Could not create the Drive folder.')}
+      p=f.id}
+    return p}
+  const findFile=async(folderId,ctx)=>(await list("name='"+esc(o.fileName)+"' and '"+folderId+"' in parents and trashed=false",'files('+FIELDS+')',ctx,{orderBy:'modifiedTime desc'}))[0]||null;
+  const multipart=(meta,data)=>{const b='td_sync_'+Math.random().toString(36).slice(2);
+    return{headers:{'Content-Type':'multipart/related; boundary='+b},body:'--'+b+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify(meta)+'\r\n--'+b+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+data+'\r\n--'+b+'--\r\n'}};
+  return{
+    async head(ids,ctx){
+      if(ids.fileId){const r=await call(API+'/files/'+ids.fileId+'?fields='+FIELDS,{},ctx,true);
+        if(r.status!==404){const j=await r.json();if(!j.trashed)return norm(j,ids.folderId)}}
+      const folderId=await findFolder(ctx,false);
+      if(!folderId)return{exists:false,fileId:'',folderId:''};
+      const f=await findFile(folderId,ctx);
+      return f?norm(f,folderId):{exists:false,fileId:'',folderId}},
+    async download(fileId,ctx){return(await call(API+'/files/'+fileId+'?alt=media',{},ctx)).text()},
+    /* Idempotent: with no known fileId we look the file up by name before creating, so a retry after a lost
+       response updates the file instead of creating a duplicate. */
+    async write(ids,data,ctx){
+      let fileId=ids.fileId,folderId=ids.folderId;
+      if(!fileId){folderId=folderId||await findFolder(ctx,true);const ex=await findFile(folderId,ctx);if(ex)fileId=ex.id}
+      if(fileId){const mp=multipart({},data),
+        r=await call(UP+'/files/'+fileId+'?uploadType=multipart&fields='+FIELDS,Object.assign({method:'PATCH'},mp),ctx,true);
+        if(r.status!==404)return norm(await r.json(),folderId);
+        fileId='';folderId=''}
+      folderId=folderId||await findFolder(ctx,true);
+      const mp=multipart({name:o.fileName,parents:[folderId]},data);
+      const r=await call(UP+'/files?uploadType=multipart&fields='+FIELDS,Object.assign({method:'POST'},mp),ctx);
+      return norm(await r.json(),folderId)},
+    async userEmail(ctx){const r=await call('https://www.googleapis.com/oauth2/v3/userinfo',{},ctx);return(await r.json()).email||''}}}
+
+/* ---- Sync engine ---- */
+function createSyncEngine(o){
+  const cfg=Object.assign({debounceMs:2500,probeMinMs:300000,skewMs:120000,backoffBaseMs:2000,backoffCapMs:300000,maxAttempts:5,maxPasses:4},o.config||{});
+  const T=o.timers,now=o.now,random=o.random||Math.random,iso=t=>new Date(t).toISOString();
+  const meta=Object.assign({v:2,connected:false,email:'',folderId:'',fileId:'',baseHash:null,remoteVersion:'',remoteMd5:'',remoteModified:'',
+    lastSyncedAt:'',lastCheckedAt:0,lastLocalChangeAt:0,rev:0,pending:false,failure:null},o.loadMeta()||{},{v:2});
+  const rt={needsAuth:false,paused:false,attempts:0};   /* runtime only: never persisted */
+  let inFlight=null,rerun=false,debounceT=null,retryT=null,started=false,epoch=0,lastProbeAt=meta.lastCheckedAt||0;
+  const commit=()=>{try{o.saveMeta(meta)}catch{}};
+  const snap=()=>snapOf(o.normalize(o.getLocal()));
+  const markBase=S=>{meta.baseHash=S.hash;o.saveBase(S.str)};
+  const remember=h=>{meta.remoteVersion=String(h.version||'');meta.remoteMd5=h.md5||'';meta.remoteModified=h.modified||''};
+  const remoteDiffers=h=>(h.md5&&meta.remoteMd5)?h.md5!==meta.remoteMd5:String(h.version||'')!==String(meta.remoteVersion||'');
+  const needsWork=()=>meta.baseHash===null||snap().hash!==meta.baseHash;
+  const synced=()=>{meta.lastSyncedAt=iso(now());meta.pending=false;commit()};
+  function status(){return{connected:meta.connected,email:meta.email,syncing:!!inFlight,pending:meta.connected&&meta.pending,
+    needsAuth:rt.needsAuth,paused:rt.paused,failure:meta.failure,lastSyncedAt:meta.lastSyncedAt,lastCheckedAt:meta.lastCheckedAt}}
+  const emit=()=>{try{o.onState&&o.onState(status())}catch{}};
+  const clearDebounce=()=>{if(debounceT!==null){T.clearTimeout(debounceT);debounceT=null}};
+  const clearRetry=()=>{if(retryT!==null){T.clearTimeout(retryT);retryT=null}};
+  const schedule=(ms,reason)=>{clearDebounce();debounceT=T.setTimeout(()=>{debounceT=null;requestSync({reason})},ms)};
+
+  /* --- local change hook: called after a Commit only. Cheap, no network. --- */
+  function noteLocalChange(){
+    meta.rev++;meta.lastLocalChangeAt=now();
+    if(!meta.connected){commit();return}
+    meta.pending=meta.baseHash===null?true:snap().hash!==meta.baseHash;commit();
+    if(!meta.pending){clearDebounce();emit();return}
+    rt.paused=false;rt.attempts=0;clearRetry();emit();
+    if(rt.needsAuth)return;                       /* waits for the user to reconnect; edits stay pending */
+    schedule(cfg.debounceMs,'local-change')}
+
+  /* --- single-flight entry point --- */
+  function requestSync(opts){
+    opts=opts||{};
+    if(!meta.connected)return Promise.resolve({status:'skipped'});
+    if(rt.needsAuth&&!opts.interactive)return Promise.resolve({status:'skipped'});
+    if(inFlight){rerun=true;return inFlight}
+    inFlight=run(opts).finally(()=>{inFlight=null;emit()});
+    emit();
+    return inFlight}
+  async function run(opts){
+    let r,passes=0;
+    do{rerun=false;lastProbeAt=now();r=await pass(opts);passes++;if(r.status==='stale')rerun=true}
+    while(rerun&&r.status!=='error'&&r.status!=='cancelled'&&passes<cfg.maxPasses&&(r.status==='stale'||needsWork()));
+    if(meta.connected){meta.pending=meta.baseHash===null?false:snap().hash!==meta.baseHash;commit();
+      if(meta.pending&&r.status!=='error'&&r.status!=='cancelled'&&!rt.needsAuth)schedule(cfg.debounceMs,'followup')}
+    return r}
+  async function pass(opts){
+    const ep=epoch,ctx={interactive:!!opts.interactive,alive(){if(ep!==epoch)throw new SyncError('CANCELLED','Sync was cancelled.',{cancelled:true})}};
+    try{
+      if(!o.online())throw new SyncError('OFFLINE','You are offline. Changes are kept on this device and will sync when you are back online.',{retryable:true,offline:true});
+      const r=await reconcile(ctx);ctx.alive();
+      meta.failure=null;rt.attempts=0;rt.paused=false;rt.needsAuth=false;clearRetry();commit();emit();
+      if(r.status==='pulled'||r.status==='merged'){try{o.onEvent&&o.onEvent({type:r.status})}catch{}}
+      return r}
+    catch(e){return fail(asSyncError(e))}}
+  function fail(e){
+    if(e.cancelled)return{status:'cancelled'};
+    meta.failure={code:e.code,message:e.message,at:now()};
+    if(e.needsAuth){rt.needsAuth=true;clearRetry()}
+    else if(e.offline)clearRetry();                 /* the 'online' event resumes; no timers while offline */
+    else if(e.retryable){rt.attempts++;
+      if(rt.attempts<=cfg.maxAttempts){const d=Math.min(cfg.backoffCapMs,cfg.backoffBaseMs*Math.pow(2,rt.attempts-1));
+        clearRetry();retryT=T.setTimeout(()=>{retryT=null;requestSync({reason:'retry'})},Math.round(d*(0.5+random()*0.5)))}
+      else{rt.paused=true;clearRetry()}}
+    else{rt.paused=true;clearRetry()}               /* permanent error: no automatic retry */
+    commit();emit();return{status:'error',error:e}}
+
+  /* --- decision flow --- */
+  async function reconcile(ctx){
+    const L=snap();
+    const head=await o.remote.head({fileId:meta.fileId,folderId:meta.folderId},ctx);ctx.alive();
+    if(head.fileId)meta.fileId=head.fileId;if(head.folderId)meta.folderId=head.folderId;
+    meta.lastCheckedAt=now();
+    if(!head.exists){                               /* nothing remote (or deleted): never touch local data */
+      if(meta.baseHash===null&&isEmpty(L.obj)){markBase(L);commit();return{status:'noop'}}
+      return push(L,ctx,true)}
+    if(meta.baseHash===null)return firstLaunch(L,head,ctx);
+    const local=L.hash!==meta.baseHash,remote=remoteDiffers(head);
+    if(!local&&!remote){commit();return{status:'unchanged'}}
+    if(!local)return pull(L,head,ctx);
+    if(!remote)return push(L,ctx,false);
+    return mergeBoth(L,head,ctx)}
+  async function fetchRemote(head,ctx){
+    const text=await o.remote.download(head.fileId,ctx);ctx.alive();
+    let parsed;try{parsed=JSON.parse(text)}catch{throw new SyncError('REMOTE_INVALID','The copy on Google Drive is not valid JSON, so it was left untouched.')}
+    const err=o.validate(parsed);
+    if(err)throw new SyncError('REMOTE_INVALID','The copy on Google Drive could not be read ('+err+'), so it was left untouched.');
+    return snapOf(o.normalize(parsed))}
+  async function push(L,ctx,create){
+    const res=await o.remote.write({fileId:create?'':meta.fileId,folderId:meta.folderId},JSON.stringify(L.obj),ctx);ctx.alive();
+    meta.fileId=res.fileId;meta.folderId=res.folderId;remember(res);markBase(L);   /* state saved only after success */
+    meta.lastSyncedAt=iso(now());meta.pending=snap().hash!==meta.baseHash;commit();
+    return{status:'pushed'}}
+  function adopt(L,R){                              /* replace local with remote, unless local moved meanwhile */
+    if(snap().hash!==L.hash)return false;
+    o.backup('local',L.obj);o.applyLocal(R.obj);markBase(snap());return true}
+  async function pull(L,head,ctx){
+    const R=await fetchRemote(head,ctx);
+    if(R.hash===meta.baseHash){remember(head);commit();return{status:'unchanged'}}   /* metadata-only change */
+    if(!adopt(L,R))return{status:'stale'};
+    remember(head);synced();return{status:'pulled'}}
+  async function mergeBoth(L,head,ctx){
+    const R=await fetchRemote(head,ctx);
+    if(R.hash===L.hash){markBase(L);remember(head);synced();return{status:'converged'}}
+    if(R.hash===meta.baseHash){remember(head);return push(L,ctx,false)}
+    return combine(L,R,head,loadBase(),ctx)}
+  async function combine(L,R,head,B,ctx){
+    const M=snapOf(o.normalize(merge3(B,L.obj,R.obj)));
+    if(snap().hash!==L.hash)return{status:'stale'};
+    o.backup('remote',R.obj);                       /* the other side's version is always preserved */
+    if(M.hash!==L.hash){o.backup('local',L.obj);o.applyLocal(M.obj)}
+    meta.baseHash=R.hash;o.saveBase(R.str);remember(head);commit();   /* base = what the remote holds right now */
+    const L2=snap();
+    if(L2.hash===R.hash){synced();return{status:'merged'}}
+    const p=await push(L2,ctx,false);
+    return p.status==='pushed'?{status:'merged'}:p}
+  function loadBase(){const s=o.loadBase();if(!s)return null;try{return o.normalize(JSON.parse(s))}catch{return null}}
+  /* No trusted base (first launch, legacy state): identical -> no write; empty yields to non-empty; a side that is
+     demonstrably newer (beyond a clock-skew margin) wins wholesale with the loser backed up; otherwise merge. */
+  async function firstLaunch(L,head,ctx){
+    const R=await fetchRemote(head,ctx);
+    if(R.hash===L.hash){markBase(L);remember(head);synced();return{status:'identical'}}
+    const lc=meta.lastLocalChangeAt,rc=Date.parse(head.modified)||0;let dir;
+    if(isEmpty(L.obj))dir='remote';else if(isEmpty(R.obj))dir='local';
+    else if(lc&&rc&&rc-lc>cfg.skewMs)dir='remote';else if(lc&&rc&&lc-rc>cfg.skewMs)dir='local';else dir='merge';
+    if(dir==='remote'){if(!adopt(L,R))return{status:'stale'};remember(head);synced();return{status:'pulled'}}
+    if(dir==='local'){if(!isEmpty(R.obj))o.backup('remote',R.obj);return push(L,ctx,false)}
+    return combine(L,R,head,null,ctx)}
+
+  /* --- explicit, enumerated triggers --- */
+  function probe(){   /* returning to the tab: a metadata-only check, throttled; uploads only if edits are pending */
+    if(!meta.connected||rt.needsAuth||rt.paused||inFlight||!o.online())return;
+    if(now()-lastProbeAt<cfg.probeMinMs)return;
+    requestSync({reason:'probe'})}
+  function onOnline(){
+    if(!meta.connected||rt.needsAuth)return;
+    if(meta.pending||meta.baseHash===null||meta.failure){rt.attempts=0;rt.paused=false;requestSync({reason:'online'})}}
+  function start(){
+    if(started||!meta.connected)return;started=true;
+    meta.failure=null;rt.needsAuth=false;
+    if(meta.baseHash===null||snap().hash!==meta.baseHash||now()-(meta.lastCheckedAt||0)>=cfg.probeMinMs)requestSync({reason:'start'})}
+  function setConnected(email){epoch++;meta.connected=true;if(email)meta.email=email;rt.needsAuth=false;rt.paused=false;rt.attempts=0;meta.failure=null;commit();emit()}
+  function authRestored(){rt.needsAuth=false;rt.paused=false;rt.attempts=0;meta.failure=null;commit();emit()}
+  function disconnect(){
+    epoch++;clearDebounce();clearRetry();started=false;
+    const keep=meta.lastLocalChangeAt,rev=meta.rev;
+    Object.assign(meta,{connected:false,email:'',folderId:'',fileId:'',baseHash:null,remoteVersion:'',remoteMd5:'',remoteModified:'',lastSyncedAt:'',lastCheckedAt:0,pending:false,failure:null,lastLocalChangeAt:keep,rev});
+    rt.needsAuth=false;rt.paused=false;rt.attempts=0;lastProbeAt=0;
+    try{o.saveBase(null)}catch{}
+    commit();emit()}
+  function dispose(){epoch++;clearDebounce();clearRetry()}
+  return{noteLocalChange,requestSync,probe,onOnline,start,setConnected,authRestored,disconnect,dispose,status}}
+
+return{SyncError,createAuth,createDriveRemote,createSyncEngine,merge3,canon,hashStr}})();
+/* ==SYNC-CORE-END== */
+
+/* ---- wiring to this app ---- */
+const DRIVE_BACKUP_FOLDER = 'MAK-Projects/Scheme-DB-Dashboard';
+const DRIVE_BACKUP_FILE = 'scheme-database-backup.json';
+const DRIVE_REVISIONS_FOLDER = 'MAK-Projects/Scheme-DB-Dashboard/revisions';
+const GDRIVE = {
+  clientId: atob('MTA2NzA3NTQ5NTIwMC1wMGhhdXJuanRwMzJvZm51YWVuNzQ5NzBybDN1OHY1di5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbQ=='),
+  folder: DRIVE_BACKUP_FOLDER,
+  fileName: DRIVE_BACKUP_FILE,
+  scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email'
+};
+
+// Sync-state keys. The legacy gdrive_* keys are read once (below) to carry an
+// existing connection across the upgrade, then ignored.
+const SYNC_META_KEY = 'schemedb.v1.sync';
+const SYNC_BASE_KEY = 'schemedb.v1.sync.base';
+const SYNC_CONFLICT_KEY = 'schemedb.v1.conflict';
+const SYNC_LOCAL_BACKUP_KEY = 'schemedb.v1.backup';
+const SYNC_TOKEN_KEY = 'schemedb.drive.token';
+
+const lsGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+const lsDel = k => { try { localStorage.removeItem(k); } catch {} };
+const ssGet = k => { try { return sessionStorage.getItem(k); } catch { return null; } };
+const ssSet = (k, v) => { try { sessionStorage.setItem(k, v); } catch {} };
+const ssDel = k => { try { sessionStorage.removeItem(k); } catch {} };
+
+// The token used to live in localStorage (the old redirect flow). Carry a
+// still-valid one into the new sessionStorage store so the upgrade does not
+// force a re-authorisation; Google's popup flow refreshes it once it expires.
+(function migrateLegacyDriveToken() {
+  try {
+    const t = localStorage.getItem('gdrive_token');
+    const exp = parseInt(localStorage.getItem('gdrive_token_expiry') || '0', 10);
+    if (t && exp > Date.now() && !ssGet(SYNC_TOKEN_KEY)) ssSet(SYNC_TOKEN_KEY, JSON.stringify({ t, exp }));
+  } catch {}
+})();
+
+// The sync snapshot is the COMMITTED state only. `schemes` holds committed base
+// records (plus staged `_new_N` placeholders, which are excluded here);
+// pendingChanges overlays are deliberately ignored so uncommitted work is never
+// treated as a local change to upload.
+function getCommittedSchemes() {
+  return schemes.filter(s => !isNewId(s.id)).map(s => toExportShape(s));
 }
 
-function clearDriveToken() {
-  window._gdriveToken = null;
-  window._gdriveTokenExpiry = 0;
-  localStorage.removeItem('gdrive_token');
-  localStorage.removeItem('gdrive_token_expiry');
-  localStorage.removeItem('gdrive_last_sync');
-  localStorage.removeItem('gdrive_last_sync_version');
-  localStorage.removeItem('gdrive_last_sync_at');
-  localStorage.removeItem('gdrive_local_modified_at');
+// Pure, order-independent normal form. Cards are sorted by createdAt (then uid)
+// so two devices holding the same cards agree no matter their local order.
+function normalizeForSync(data) {
+  const list = Array.isArray(data) ? data : (data && Array.isArray(data.schemes) ? data.schemes : []);
+  return list.map((s, i) => normalizeScheme(s, i)).sort((a, b) => {
+    const ca = String(a.createdAt || ''), cb = String(b.createdAt || '');
+    if (ca !== cb) return ca < cb ? -1 : 1;
+    return a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0;
+  });
 }
 
-function getDeviceId() {
-  let id = localStorage.getItem('gdrive_device_id');
-  if (!id) {
-    id = 'dev-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
-    localStorage.setItem('gdrive_device_id', id);
+// A Drive copy that is not a list of named cards is refused (never applied,
+// never overwritten) — SyncCore turns the returned string into REMOTE_INVALID.
+function validateSyncData(data) {
+  const list = Array.isArray(data) ? data : (data && Array.isArray(data.schemes) ? data.schemes : null);
+  if (!list) return 'the top-level value is not a list of cards';
+  if (!list.every(s => s && typeof s === 'object' && typeof s.name === 'string' && s.name.trim())) {
+    return 'it contains entries without a name';
   }
-  return id;
+  return '';
 }
 
-function getLastSyncVersion() {
-  return parseInt(localStorage.getItem('gdrive_last_sync_version') || '0', 10);
+const loadGis = () => new Promise((res, rej) => {
+  if (window.google && google.accounts && google.accounts.oauth2) return res(google.accounts.oauth2);
+  let done = false;
+  const s = document.createElement('script');
+  s.src = 'https://accounts.google.com/gsi/client';
+  s.async = true;
+  s.onload = () => { if (!done) { done = true; window.google && google.accounts && google.accounts.oauth2 ? res(google.accounts.oauth2) : rej(new Error('Google Sign-In did not initialise.')); } };
+  s.onerror = () => { if (!done) { done = true; rej(new Error('Could not load Google Sign-In.')); } };
+  setTimeout(() => { if (!done) { done = true; rej(new Error('Google Sign-In timed out loading.')); } }, 15000);
+  document.head.append(s);
+});
+
+function loadSyncMeta() {
+  let m = null;
+  try { m = JSON.parse(lsGet(SYNC_META_KEY)); } catch {}
+  if (m && m.v === 2) return m;
+  m = {};
+  // Migrate the old connection flags. The version counters are obsolete under
+  // content-hash sync, so only the connection and the local-change time are
+  // carried over; baseHash stays null so the first sync reconciles properly.
+  try {
+    if (ssGet(SYNC_TOKEN_KEY)) m.connected = true;
+    const at = parseInt(localStorage.getItem('gdrive_last_sync_at') || '0', 10);
+    if (at > 0) m.lastSyncedAt = new Date(at).toISOString();
+    const t = parseInt(localStorage.getItem('gdrive_local_modified_at') || '0', 10);
+    if (t > 0) m.lastLocalChangeAt = t;
+  } catch {}
+  return m;
 }
 
-function getLastSyncAt() {
-  let v = parseInt(localStorage.getItem('gdrive_last_sync_at') || '0', 10);
-  // Migrate the legacy single wall-clock sync marker if present.
-  if (!v) v = parseInt(localStorage.getItem('gdrive_last_sync') || '0', 10);
-  return v;
+const auth = SyncCore.createAuth({
+  loadGis, clientId: GDRIVE.clientId, scope: GDRIVE.scope, now: () => Date.now(),
+  origin: location.origin, protocol: location.protocol, hostname: location.hostname,
+  storage: { get: () => ssGet(SYNC_TOKEN_KEY), set: v => ssSet(SYNC_TOKEN_KEY, v), remove: () => ssDel(SYNC_TOKEN_KEY) },
+  getHint: () => syncEngine && syncEngine.status().email
+});
+const driveRemote = SyncCore.createDriveRemote({ fetch: (u, i) => fetch(u, i), auth, folder: GDRIVE.folder, fileName: GDRIVE.fileName });
+
+// Before any overwrite, the losing snapshot is archived both locally and
+// (best-effort) in the Drive revisions/ folder, so a merge can never silently
+// destroy the only copy of either side.
+function archiveRevision(which, obj) {
+  try { lsSet(which === 'local' ? SYNC_LOCAL_BACKUP_KEY : SYNC_CONFLICT_KEY, JSON.stringify(obj)); } catch {}
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  const remote = SyncCore.createDriveRemote({
+    fetch: (u, i) => fetch(u, i), auth, folder: DRIVE_REVISIONS_FOLDER,
+    fileName: `scheme-revision-${stamp}-${which}.json`
+  });
+  remote.write({ fileId: '', folderId: '' }, JSON.stringify(obj, null, 2), { interactive: false })
+    .catch(err => console.warn('Drive revision archive skipped:', err && err.message));
 }
 
-function getLocalModifiedAt() {
-  return parseInt(localStorage.getItem('gdrive_local_modified_at') || '0', 10);
+let syncEngine = null;
+// Called after a successful Commit (and after an import that rewrites the
+// store) — the only moments committed state changes — so the engine can
+// debounce an upload. Cheap and offline-safe: it never touches the network.
+function noteLocalChange() {
+  if (syncEngine) syncEngine.noteLocalChange();
 }
-
-function setLocalModifiedAt() {
-  localStorage.setItem('gdrive_local_modified_at', String(Date.now()));
-}
-
-function setLastSyncState(version) {
-  const now = Date.now();
-  localStorage.setItem('gdrive_last_sync_version', String(version));
-  localStorage.setItem('gdrive_last_sync_at', String(now));
-  // After a successful sync the local copy agrees with Drive at this point,
-  // so no "local changed since last sync" conflict is flagged.
-  localStorage.setItem('gdrive_local_modified_at', String(now));
-}
-
-const _driveClientIdB64 = 'MTA2NzA3NTQ5NTIwMC1wMGhhdXJuanRwMzJvZm51YWVuNzQ5NzBybDN1OHY1di5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbQ==';
-function getDriveClientId() { return atob(_driveClientIdB64); }
-
-function getRedirectUri() {
-  return window.location.origin + window.location.pathname;
-}
-
-function oauthSignIn() {
-  // Signing in submits a form that navigates the page away, which silently
-  // discards every staged (uncommitted) change. Refuse unless nothing is
-  // staged so no work can be lost.
-  if (pendingChanges.size > 0) {
-    alert(`You have ${pendingChanges.size} uncommitted change(s). Commit or discard them before signing in — signing in reloads the page and would lose them.`);
-    return;
+syncEngine = SyncCore.createSyncEngine({
+  getLocal: getCommittedSchemes,
+  normalize: normalizeForSync,
+  validate: validateSyncData,
+  remote: driveRemote,
+  now: () => Date.now(),
+  timers: { setTimeout: (f, ms) => setTimeout(f, ms), clearTimeout: t => clearTimeout(t) },
+  online: () => navigator.onLine !== false,
+  loadMeta: loadSyncMeta,
+  saveMeta: m => lsSet(SYNC_META_KEY, JSON.stringify(m)),
+  loadBase: () => lsGet(SYNC_BASE_KEY),
+  saveBase: s => (s == null ? lsDel(SYNC_BASE_KEY) : lsSet(SYNC_BASE_KEY, s)),
+  backup: archiveRevision,
+  applyLocal: obj => {
+    // Remote data replaces the committed store. It must never swallow staged
+    // work, so refuse (the engine treats this as a failed pass and retries
+    // after the next commit) if the user has uncommitted changes.
+    if (pendingChanges.size > 0) {
+      throw new SyncCore.SyncError('PENDING', 'You have uncommitted changes, so the newer Drive data was not applied. Commit them and sync again.');
+    }
+    const records = obj.map((s, i) => normalizeScheme(s, i));
+    // Update the in-memory base synchronously so the engine's snapshot sees the
+    // applied state at once; then persist atomically (replace the whole store).
+    schemes = records.map((r, i) => ({ id: -(i + 1), ...r }));
+    render();
+    dbCommit({ puts: [], adds: records, clear: true })
+      .then(loadSchemes)
+      .catch(err => {
+        console.error('Failed to save synced data', err);
+        showToast('Sync applied but could not be saved — reload the page.');
+      });
+  },
+  onState: () => driveUI(),
+  onEvent: e => {
+    showToast(e.type === 'merged' ? 'Merged changes from another device' : 'Loaded newer data from Drive');
+    if (e.type === 'merged') render();
   }
-  const clientId = getDriveClientId();
+});
 
-  const form = document.createElement('form');
-  form.setAttribute('method', 'GET');
-  form.setAttribute('action', 'https://accounts.google.com/o/oauth2/v2/auth');
+/* ---- Data-menu UI ---- */
+function driveUI() {
+  const s = syncEngine.status();
+  const when = t => t ? new Date(t).toLocaleString() : 'never';
 
-  const params = {
-    'client_id': clientId,
-    'redirect_uri': getRedirectUri(),
-    'response_type': 'token',
-    'scope': 'https://www.googleapis.com/auth/drive.file',
-    'include_granted_scopes': 'true'
-    // No `prompt`: an existing Google session with prior consent returns a
-    // token with no interaction (follows the browser's active account).
-    // Consent then appears only on genuine first use.
-  };
+  driveConnectLabel.textContent = s.connected ? 'Disconnect from Google' : 'Sign in with Google';
+  driveConnectIcon.textContent = s.connected ? '🔌' : '🔗';
+  driveConnectDesc.textContent = s.connected
+    ? 'Click to sign out'
+    : 'Opens a Google sign-in popup to authorize this app';
+  driveConnectDesc.style.opacity = '1';
+  dataDriveSync.disabled = !s.connected || s.syncing;
 
-  for (const p in params) {
-    const input = document.createElement('input');
-    input.setAttribute('type', 'hidden');
-    input.setAttribute('name', p);
-    input.setAttribute('value', params[p]);
-    form.appendChild(input);
+  let text, sub = '', err = false;
+  if (!s.connected) {
+    text = 'Not connected to Google Drive';
+    sub = 'Click Sign in to authorize with Google Drive';
+  } else if (s.syncing) {
+    text = 'Syncing with Google Drive…';
+    sub = 'Checking for changes';
+  } else if (s.needsAuth) {
+    text = 'Google sign-in needs renewing';
+    sub = (s.failure && s.failure.message) || 'Click "Sign in with Google" to reconnect';
+    err = true;
+  } else if (s.failure && s.failure.code === 'PENDING') {
+    text = 'Connected to Google Drive' + (s.email ? ` as ${s.email}` : '');
+    sub = s.failure.message;
+    err = true;
+  } else if (s.failure) {
+    text = 'Sync failed';
+    sub = s.failure.message + (s.paused ? ' — click Sync now to retry.' : ' Retrying automatically.');
+    err = true;
+  } else {
+    text = 'Connected to Google Drive' + (s.email ? ` as ${s.email}` : '');
+    sub = (s.pending ? 'Changes pending — ' : 'Up to date · ') + 'Last synced: ' + when(s.lastSyncedAt);
   }
-
-  document.body.appendChild(form);
-  form.submit();
+  driveStatusText.textContent = text;
+  driveStatusSub.textContent = sub;
+  driveStatusSub.style.color = err ? 'var(--danger)' : '';
 }
 
-function extractTokenFromHash() {
-  const hash = window.location.hash;
-  if (!hash) return;
-  const params = new URLSearchParams(hash.substring(1));
-  if (params.get('error')) {
-    const why = params.get('error') === 'access_denied'
-      ? 'Drive sign-in cancelled'
-      : 'Drive sign-in failed: ' + params.get('error');
-    showToast(why);
-    window.history.replaceState(null, '', window.location.pathname + window.location.search);
-    return;
-  }
-  if (!hash.includes('access_token')) return;
-  const token = params.get('access_token');
-  const expiresIn = parseInt(params.get('expires_in') || '3600', 10);
-  if (token) {
-    saveDriveToken(token, expiresIn);
-    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+let driveConnecting = false;
+async function driveConnect() {
+  if (driveConnecting) return;
+  driveConnecting = true;
+  dataDriveConnect.disabled = true;
+  driveStatusText.textContent = 'Connecting to Google…';
+  driveStatusSub.textContent = 'Complete the sign-in popup';
+  driveStatusSub.style.color = '';
+  try {
+    await auth.getToken({ interactive: true });
+    let email = '';
+    try { email = await driveRemote.userEmail({ interactive: false }); } catch {}
+    syncEngine.setConnected(email);
+    syncEngine.authRestored();
+    const r = await syncEngine.requestSync({ interactive: true, reason: 'connect' });
+    showToast(r.status === 'error' ? 'Drive sync failed' : 'Connected to Google Drive');
+  } catch (err) {
+    driveStatusText.textContent = 'Connect failed';
+    driveStatusSub.textContent = (err && err.message) || 'Unknown error';
+    driveStatusSub.style.color = 'var(--danger)';
+    if (!(err && err.code)) console.error('Drive connect:', err && err.name, err);
+  } finally {
+    driveConnecting = false;
+    dataDriveConnect.disabled = false;
+    driveUI();
   }
 }
 
 dataDriveConnect.addEventListener('click', () => {
-  if (window._gdriveToken) {
-    clearDriveToken();
-    showToast('Disconnected from Drive');
-    openDataMenuModal();
+  if (syncEngine.status().connected) {
+    syncEngine.disconnect();
+    auth.clear();
+    showToast('Disconnected from Google Drive');
+    driveUI();
     return;
   }
-  oauthSignIn();
+  driveConnect();
 });
-
-function ensureDriveToken() {
-  const expired = window._gdriveToken && Date.now() >= window._gdriveTokenExpiry;
-  if (!window._gdriveToken || expired) {
-    if (!expired) {
-      // Never connected (or explicitly disconnected): ask first.
-      showToast('Not connected to Drive');
-      openDataMenuModal();
-      return false;
-    }
-    // Token merely aged out (~1h implicit lifetime): reconnect directly.
-    // With no forced consent screen this is usually an instant bounce.
-    showToast('Reconnecting to Drive…');
-    oauthSignIn();
-    return false;
-  }
-  return true;
-}
-
-const DRIVE_BACKUP_FOLDER = 'MAK-Projects/Scheme-DB-Dashboard';
-const DRIVE_BACKUP_FILE = 'scheme-database-backup.json';
-const DRIVE_VERSION_FILE = 'scheme-database-version.json';
-const DRIVE_REVISIONS_FOLDER = 'MAK-Projects/Scheme-DB-Dashboard/revisions';
-
-async function driveGetOrCreateFolder(path) {
-  const parts = path.split('/').filter(Boolean);
-  let parentId = 'root';
-  for (const part of parts) {
-    const q = encodeURIComponent(`name='${part}' and '${parentId}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'`);
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`, {
-      headers: { Authorization: 'Bearer ' + window._gdriveToken }
-    });
-    if (!res.ok) throw new Error('Drive folder lookup failed: ' + res.status);
-    const files = (await res.json()).files || [];
-    if (files.length > 0) {
-      parentId = files[0].id;
-    } else {
-      const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
-        method: 'POST',
-        headers: { Authorization: 'Bearer ' + window._gdriveToken, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: part, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] })
-      });
-      if (!createRes.ok) throw new Error('Drive folder create failed: ' + createRes.status);
-      parentId = (await createRes.json()).id;
-    }
-  }
-  return parentId;
-}
-
-async function driveListFiles(name, parentId) {
-  let q = `name='${name}' and trashed=false`;
-  if (parentId) q += ` and '${parentId}' in parents`;
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,modifiedTime)`, {
-    headers: { Authorization: 'Bearer ' + window._gdriveToken }
-  });
-  if (!res.ok) throw new Error('Drive list failed: ' + res.status);
-  return (await res.json()).files || [];
-}
-
-async function driveUpload(name, data, parentId, silent = false) {
-  const files = await driveListFiles(name, parentId);
-  const metadata = { name, mimeType: 'application/json' };
-  if (parentId) metadata.parents = [parentId];
-  const body = JSON.stringify(data);
-
-  if (files.length > 0) {
-    const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${files[0].id}?uploadType=media`, {
-      method: 'PATCH',
-      headers: { Authorization: 'Bearer ' + window._gdriveToken, 'Content-Type': 'application/json' },
-      body
-    });
-    if (!res.ok) throw new Error('Drive update failed: ' + res.status);
-    if (!silent) showToast('Updated existing file on Drive');
-  } else {
-    const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + window._gdriveToken },
-      body: (() => {
-        const mp = new FormData();
-        mp.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-        mp.append('file', new Blob([body], { type: 'application/json' }), name);
-        return mp;
-      })()
-    });
-    if (!res.ok) throw new Error('Drive create failed: ' + res.status);
-    if (!silent) showToast('Created backup on Drive');
-  }
-}
-
-async function driveDownload(name, parentId) {
-  const files = await driveListFiles(name, parentId);
-  if (files.length === 0) throw new Error('No backup found on Drive');
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${files[0].id}?alt=media`, {
-    headers: { Authorization: 'Bearer ' + window._gdriveToken }
-  });
-  if (!res.ok) throw new Error('Drive download failed: ' + res.status);
-  return await res.json();
-}
-
-// ========== Unified Drive sync (version-tracked) ==========
-async function driveReadVersion(parentId) {
-  const files = await driveListFiles(DRIVE_VERSION_FILE, parentId);
-  if (files.length === 0) return null;
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${files[0].id}?alt=media`, {
-    headers: { Authorization: 'Bearer ' + window._gdriveToken }
-  });
-  if (!res.ok) throw new Error('Drive version read failed: ' + res.status);
-  const meta = await res.json();
-  // A malformed/foreign version file is treated as absent (baseline path).
-  if (!meta || typeof meta.version !== 'number') return null;
-  return meta;
-}
-
-function buildVersionMeta(version, action, prevMeta) {
-  const now = new Date().toISOString();
-  const entry = { version, updatedAt: now, deviceId: getDeviceId(), action };
-  const history = [entry];
-  if (prevMeta && Array.isArray(prevMeta.history)) history.push(...prevMeta.history);
-  return { version, deviceId: getDeviceId(), updatedAt: now, history: history.slice(0, 20) };
-}
-
-async function driveWriteVersion(parentId, meta) {
-  await driveUpload(DRIVE_VERSION_FILE, meta, parentId, true);
-}
-
-async function driveSaveRevision(data, reason) {
-  const revFolderId = await driveGetOrCreateFolder(DRIVE_REVISIONS_FOLDER);
-  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-  const name = `scheme-revision-${stamp}-${reason}.json`;
-  await driveUpload(name, data, revFolderId, true);
-}
-
-async function syncPush(folderId, driveMeta, baseVersion) {
-  const nextVersion = baseVersion + 1;
-  const data = getExportData();
-  await driveUpload(DRIVE_BACKUP_FILE, data, folderId, true);
-  await driveWriteVersion(folderId, buildVersionMeta(nextVersion, 'push', driveMeta));
-  setLastSyncState(nextVersion);
-}
-
-async function syncPull(folderId, driveMeta, driveVersion) {
-  const data = await driveDownload(DRIVE_BACKUP_FILE, folderId);
-  const ok = await importSchemesData(data, true);
-  // importSchemesData already guards against invalid data and pending
-  // changes; if it bailed out, keep local state intact and DO NOT advance
-  // the sync markers — marking this as synced would let a later push
-  // overwrite the Drive backup with local data that never got pulled.
-  if (!ok) throw new Error('Import of Drive backup was rejected; sync aborted.');
-  await driveWriteVersion(folderId, buildVersionMeta(driveVersion, 'pull', driveMeta));
-  setLastSyncState(driveVersion);
-}
 
 dataDriveSync.addEventListener('click', async () => {
-  if (!ensureDriveToken()) return;
-  closeDataMenuModal();
+  if (!syncEngine.status().connected) { showToast('Not connected to Drive'); return; }
   if (pendingChanges.size > 0) {
-    alert(`You have ${pendingChanges.size} uncommitted change(s). Commit or discard them before syncing with Drive.`);
+    showToast(`Commit or discard ${pendingChanges.size} pending change(s) before syncing.`);
     return;
   }
-  dataDriveSync.disabled = true;
-  try {
-    const folderId = await driveGetOrCreateFolder(DRIVE_BACKUP_FOLDER);
-    const driveMeta = await driveReadVersion(folderId);
-    const localV = getLastSyncVersion();
-    const localChanged = getLocalModifiedAt() > getLastSyncAt();
-
-    // ---- No version history on Drive: establish a baseline ----
-    if (!driveMeta) {
-      const legacy = await driveListFiles(DRIVE_BACKUP_FILE, folderId);
-      if (legacy.length === 0) {
-        await syncPush(folderId, null, 0);
-        showToast('Uploaded local data as baseline (v1)');
-      } else if (confirm('No sync history found on Drive, but a backup file already exists there.\n\nOK = Download the Drive backup (replaces local data)\nCancel = Upload local data to Drive as the new baseline')) {
-        await syncPull(folderId, null, 1);
-        showToast('Downloaded existing Drive backup (baseline v1)');
-      } else {
-        // Uploading a new baseline overwrites the existing Drive backup in
-        // place. Preserve the old copy as a revision first so that choosing
-        // "upload local" can never silently destroy the only Drive copy.
-        try {
-          const legacyData = await driveDownload(DRIVE_BACKUP_FILE, folderId);
-          await driveSaveRevision(legacyData, 'baseline-replaced');
-        } catch (preserveErr) {
-          console.error('Failed to preserve legacy Drive backup before baseline push:', preserveErr);
-        }
-        await syncPush(folderId, null, 0);
-        showToast('Uploaded local data as baseline (v1)');
-      }
-      return;
-    }
-
-    const driveV = driveMeta.version;
-
-    // Drive copy was replaced/reset behind our back: refuse rather than clobber.
-    if (driveV < localV) {
-      alert(`Drive is at v${driveV} but your last sync was v${localV}. The Drive copy appears to have been reset or replaced.\n\nSkipping sync to avoid data loss. Re-establish a baseline with a manual export/import if the Drive backup is authoritative.`);
-      return;
-    }
-
-    if (driveV > localV) {
-      // Cloud is ahead of what this device has seen.
-      if (!localChanged) {
-        await syncPull(folderId, driveMeta, driveV);
-        showToast(`Downloaded newer version from Drive (v${driveV})`);
-      } else {
-        // True conflict: both sides changed since the last sync.
-        const keepLocal = confirm(`Your local data and the Drive backup both changed since your last sync (you were at v${localV}, Drive is now v${driveV}).\n\nOK = Keep LOCAL changes and upload them to Drive\nCancel = Keep DRIVE changes and replace local data\n\nEither way, the losing copy is preserved as a revision on Drive.`);
-        if (keepLocal) {
-          const driveData = await driveDownload(DRIVE_BACKUP_FILE, folderId);
-          await driveSaveRevision(driveData, 'conflict-drive');
-          await syncPush(folderId, driveMeta, driveV);
-          showToast(`Kept local changes (uploaded v${driveV + 1}); Drive copy saved as revision`);
-        } else {
-          await driveSaveRevision(getExportData(), 'conflict-local');
-          await syncPull(folderId, driveMeta, driveV);
-          showToast(`Kept Drive changes (v${driveV}); local copy saved as revision`);
-        }
-      }
-    } else {
-      // Local is caught up with (or equal to) Drive.
-      if (localChanged) {
-        await syncPush(folderId, driveMeta, localV);
-        showToast(`Uploaded local changes (v${localV + 1})`);
-      } else {
-        showToast(`Already up to date (v${localV})`);
-      }
-    }
-  } catch (err) {
-    console.error(err);
-    showToast('Sync failed: ' + err.message);
-  } finally {
-    dataDriveSync.disabled = false;
-  }
+  closeDataMenuModal();
+  const r = await syncEngine.requestSync({ interactive: true, reason: 'manual' });
+  showToast(
+    r.status === 'error' ? 'Sync failed: ' + ((r.error && r.error.message) || 'unknown error')
+      : r.status === 'pushed' ? 'Synced to Drive'
+      : (r.status === 'pulled' || r.status === 'merged') ? 'Updated from Drive'
+      : 'Already up to date'
+  );
 });
+
+/* ---- Triggers (each registered exactly once) ----
+   Staged edits are never synced: a trigger that fires while work is staged is
+   ignored, and the successful Commit (via noteLocalChange) is what re-arms sync.
+   Returning to the tab runs a throttled metadata-only check; regaining the
+   network resumes pending work. Focus/blur/timers never upload anything by
+   themselves. */
+function syncIsDeferred() { return pendingChanges.size > 0; }
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && !syncIsDeferred()) syncEngine.probe();
+});
+window.addEventListener('online', () => { if (!syncIsDeferred()) syncEngine.onOnline(); });
 
 // ========== Click outside to exit selection ==========
 document.addEventListener('click', e => {
@@ -4292,11 +4558,11 @@ document.addEventListener('click', e => {
 });
 
 // ========== Init ==========
-extractTokenFromHash();
 loadSchemes();
+syncEngine.start();
 
 // Any staged (uncommitted) change is memory-only; leaving the page — tab
-// close, refresh, Google sign-in — would drop it silently. Warn when there
+// close, refresh, or reload — would drop it silently. Warn when there
 // is pending work that would be lost.
 window.addEventListener('beforeunload', e => {
   if (pendingChanges.size > 0) {
